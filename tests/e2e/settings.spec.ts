@@ -81,7 +81,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 	// The audit now goes by them.
 	await openAudit(page);
 	await expect(page.locator('#content')).toContainText(
-		'Active members of Midsouth Garrison belong in Command Staff.'
+		'Active members of Midsouth Garrison belong in both Command Staff and Garrison Members.'
 	);
 });
 

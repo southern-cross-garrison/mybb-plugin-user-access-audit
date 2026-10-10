@@ -8,7 +8,7 @@
  * - a 501st record that is not Active (Reserve, a classified record, anything else): in
  *   neither;
  * - Active, in another unit: in the 501st members group and not the unit's;
- * - Active, in this unit: in the unit's group and not the 501st members group.
+ * - Active, in this unit: in both - they are 501st members as much as anybody.
  *
  * Only those two groups are ever changed. Every other group a member is in - command
  * staff, moderators, administrators - is left exactly as it is.
@@ -235,7 +235,7 @@ function access_audit_evaluate(array $config, array $members)
         elseif((int)$record['garrison_id'] === (int)$config['unit'])
         {
             $verdict = ACCESS_AUDIT_OUR_UNIT;
-            $wanted = array((int)$config['unit_group']);
+            $wanted = array((int)$config['unit_group'], (int)$config['legion_group']);
         }
         else
         {
@@ -344,7 +344,8 @@ function access_audit_is_banned(array $member, array $groups)
  * is taken away goes back to showing the primary group.
  *
  * @param array $member As access_audit_members()
- * @param array $wanted The audited groups the member belongs in: none, or one of them
+ * @param array $wanted The audited groups the member belongs in: none, the 501st members
+ *                      group, or both
  * @param array $config As access_audit_config()
  * @return array 'usergroup', 'additionalgroups' (comma separated), 'displaygroup', 'add'
  *               and 'remove' (group ids), 'primary_from' and 'primary_to' (group ids, equal

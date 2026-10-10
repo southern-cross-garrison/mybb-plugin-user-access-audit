@@ -217,7 +217,7 @@ function access_audit_install_settings()
         array(
             "name"        => "access_audit_unit_group",
             "title"       => "Unit Members Group",
-            "description" => "Active 501st members of this unit belong in this group.",
+            "description" => "Active members of this unit belong in this group.",
             "optionscode" => "groupselectsingle",
             "value"       => "",
             "disporder"   => 5,
@@ -225,7 +225,7 @@ function access_audit_install_settings()
         array(
             "name"        => "access_audit_legion_group",
             "title"       => "501st Members Group",
-            "description" => "Active 501st members of other units belong in this group.",
+            "description" => "Every active 501st member belongs in this group, this unit's own included.",
             "optionscode" => "groupselectsingle",
             "value"       => "",
             "disporder"   => 6,

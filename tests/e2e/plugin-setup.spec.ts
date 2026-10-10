@@ -110,7 +110,9 @@ test("leaves nothing behind when uninstalled, and members' groups as they are", 
 			)
 		).toEqual([]);
 		expect(await getGroups('unitmember')).toEqual(before);
-		expect(before.additionalgroups).toEqual([fixtures().groups.unit]);
+		expect(before.additionalgroups).toEqual(
+			[fixtures().groups.unit, fixtures().groups.legion].sort((a, b) => a - b)
+		);
 
 		await clickPluginLink(page, 'Install & Activate');
 		expect(await settingNames()).toEqual(SETTINGS);

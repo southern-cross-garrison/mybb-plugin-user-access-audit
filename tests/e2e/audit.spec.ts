@@ -30,9 +30,9 @@ import {
  * of the two audited groups fixed one row at a time.
  *
  * Provisioned members and the records stubFixtureMembers() gives them:
- *   unitmember   TK-10001  Active, this unit       Garrison Members
+ *   unitmember   TK-10001  Active, this unit       Garrison Members, 501st Members
  *   legionmember TK-10002  Active, another unit    501st Members
- *   commander    TK-10003  Active, this unit       Command Staff, Garrison Members
+ *   commander    TK-10003  Active, this unit       Command Staff, Garrison Members, 501st Members
  *   guestmember  -                                 neither
  *   trooper1     TK-20001  Classified Record       neither
  *   trooper2     TK-20002  Classified Record       neither
@@ -78,7 +78,7 @@ test.describe('the audit', () => {
 		await openAudit(page);
 
 		await expect(page.locator('#content')).toContainText(
-			'Active members of Southern Cross Garrison belong in Garrison Members. Active members of any other unit belong in 501st Members.'
+			'Active members of Southern Cross Garrison belong in both Garrison Members and 501st Members. Active members of any other unit belong in 501st Members only.'
 		);
 	});
 
@@ -140,7 +140,9 @@ test.describe('who belongs where', () => {
 		const member = row(page, 'unitmember');
 		await expect(member.locator('.access-audit-status')).toHaveText('Reserve');
 		await expect(member.locator('.access-audit-unit')).toHaveText('Southern Cross Garrison');
-		await expect(member.locator('.access-audit-change')).toHaveText('Remove from Garrison Members');
+		await expect(member.locator('.access-audit-change')).toHaveText(
+			'Remove from Garrison Members; Remove from 501st Members'
+		);
 
 		await fix(page, 'unitmember');
 		expect((await getGroups('unitmember')).additionalgroups).toEqual([]);
@@ -171,9 +173,8 @@ test.describe('who belongs where', () => {
 			'Active - Midsouth Garrison'
 		);
 		await expect(member.locator('.access-audit-record')).toContainText('Moved Away');
-		await expect(member.locator('.access-audit-change')).toHaveText(
-			'Add to 501st Members; Remove from Garrison Members'
-		);
+		// Still a 501st member, so only the unit's group goes.
+		await expect(member.locator('.access-audit-change')).toHaveText('Remove from Garrison Members');
 
 		await fix(page, 'unitmember');
 		expect(await getGroups('unitmember')).toEqual({
@@ -183,28 +184,57 @@ test.describe('who belongs where', () => {
 		});
 	});
 
-	test('an active member of this unit in neither group joins the unit members group', async ({
+	test('an active member of this unit in neither group joins both', async ({ page }) => {
+		await setGroups('unitmember');
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Members; Add to 501st Members'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual(
+			[groups().unit, groups().legion].sort((a, b) => a - b)
+		);
+	});
+
+	test('an active member of this unit in only its group joins the 501st members group', async ({
 		page,
 	}) => {
-		await setGroups('unitmember');
+		await setGroups('unitmember', { additionalgroups: [groups().unit] });
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to 501st Members'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual(
+			[groups().unit, groups().legion].sort((a, b) => a - b)
+		);
+	});
+
+	test('an active member of this unit in only the 501st members group joins the unit members group', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', { additionalgroups: [groups().legion] });
 		await openAudit(page);
 
 		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
 			'Add to Garrison Members'
 		);
 		await fix(page, 'unitmember');
-		expect((await getGroups('unitmember')).additionalgroups).toEqual([groups().unit]);
+		expect((await getGroups('unitmember')).additionalgroups).toEqual(
+			[groups().unit, groups().legion].sort((a, b) => a - b)
+		);
 	});
 
-	test('an active member of this unit leaves the 501st members group', async ({ page }) => {
-		await setGroups('unitmember', { additionalgroups: [groups().unit, groups().legion] });
-		await openAudit(page);
+	test('an active member of this unit counts a primary group as being in it', async ({ page }) => {
+		await setGroups('unitmember', {
+			usergroup: groups().unit,
+			additionalgroups: [groups().legion],
+		});
+		await openAudit(page, { all: true });
 
-		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
-			'Remove from 501st Members'
-		);
-		await fix(page, 'unitmember');
-		expect((await getGroups('unitmember')).additionalgroups).toEqual([groups().unit]);
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText('Nothing');
 	});
 
 	test('a member of an outpost counts as another unit', async ({ page }) => {
@@ -223,7 +253,7 @@ test.describe('who belongs where', () => {
 
 		await expect(row(page, 'trooper1').locator('.access-audit-legion-id')).toHaveText('tk 0020001');
 		await expect(row(page, 'trooper1').locator('.access-audit-change')).toHaveText(
-			'Add to Garrison Members'
+			'Add to Garrison Members; Add to 501st Members'
 		);
 		await expect(row(page, 'trooper2').locator('.access-audit-change')).toHaveText(
 			'Add to 501st Members'
@@ -240,8 +270,41 @@ test.describe('who belongs where', () => {
 			'No Legion ID on their profile'
 		);
 		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
-			'Remove from Garrison Members'
+			'Remove from Garrison Members; Remove from 501st Members'
 		);
+	});
+});
+
+test.describe('the Legion ID', () => {
+	test('links to 501st.com by its number, shown as the member typed it', async ({ page }) => {
+		await setLegionId('trooper1', 'tk 0020001');
+		await setLegionId('trooper2', 'pending');
+		await openAudit(page, { all: true });
+
+		const typed = row(page, 'unitmember').locator('.access-audit-legion-id a');
+		await expect(typed).toHaveText('TK-10001');
+		await expect(typed).toHaveAttribute('href', 'https://501st.com/member/10001');
+		await expect(typed).toHaveAttribute('target', '_blank');
+		await expect(typed).toHaveAttribute('rel', 'noopener noreferrer');
+
+		await expect(row(page, 'trooper1').locator('.access-audit-legion-id a')).toHaveAttribute(
+			'href',
+			'https://501st.com/member/20001'
+		);
+		// Whatever the API said: no public record, and banned, are linked too.
+		await expect(row(page, 'trooper1').locator('.access-audit-legion-id a')).toHaveText(
+			'tk 0020001'
+		);
+		await expect(row(page, 'banned').locator('.access-audit-legion-id a')).toHaveAttribute(
+			'href',
+			'https://501st.com/member/30001'
+		);
+
+		// No number, no link.
+		await expect(row(page, 'trooper2').locator('.access-audit-legion-id')).toHaveText('pending');
+		await expect(row(page, 'trooper2').locator('.access-audit-legion-id a')).toHaveCount(0);
+		await expect(row(page, 'guestmember').locator('.access-audit-legion-id')).toHaveText('None');
+		await expect(row(page, 'guestmember').locator('.access-audit-legion-id a')).toHaveCount(0);
 	});
 });
 
@@ -288,10 +351,10 @@ test.describe('groups the audit does not manage', () => {
 
 		// Their command staff group is no business of the audit's.
 		await expect(row(page, 'commander').locator('.access-audit-groups')).toHaveText(
-			'Garrison Members'
+			'Garrison Members501st Members'
 		);
 		await expect(row(page, 'commander').locator('.access-audit-change')).toHaveText(
-			'Add to 501st Members; Remove from Garrison Members'
+			'Remove from Garrison Members'
 		);
 
 		await fix(page, 'commander');
@@ -424,7 +487,7 @@ test.describe('when the API cannot answer', () => {
 	}
 
 	test('will not fix a member it cannot check, even when asked to directly', async ({ page }) => {
-		await setGroups('unitmember', { additionalgroups: [groups().unit, groups().legion] });
+		await setGroups('unitmember', { additionalgroups: [groups().unit] });
 		await openAudit(page);
 		await expect(fixButton(page, 'unitmember')).toHaveCount(1);
 
@@ -439,9 +502,7 @@ test.describe('when the API cannot answer', () => {
 			form: { my_post_key: key!, uid: String(uid('unitmember')) },
 		});
 
-		expect((await getGroups('unitmember')).additionalgroups).toEqual(
-			[groups().unit, groups().legion].sort((a, b) => a - b)
-		);
+		expect((await getGroups('unitmember')).additionalgroups).toEqual([groups().unit]);
 	});
 
 	test('asks again next time about a member it could not check', async ({ page }) => {
@@ -634,10 +695,10 @@ test.describe('members sharing a Legion ID', () => {
 		await setLegionId('trooper1', 'TK-10001');
 		await openAudit(page);
 
-		// The record is unitmember's, so it says trooper1 belongs in the unit's group too.
-		// The note is there so that is looked at, not pressed.
+		// The record is unitmember's, so it says trooper1 belongs in both groups too. The
+		// note is there so that is looked at, not pressed.
 		await expect(row(page, 'trooper1').locator('.access-audit-change')).toHaveText(
-			'Add to Garrison Members'
+			'Add to Garrison Members; Add to 501st Members'
 		);
 		await expect(fixButton(page, 'trooper1')).toBeVisible();
 		await expect(fixButton(page, 'unitmember')).toHaveCount(0);

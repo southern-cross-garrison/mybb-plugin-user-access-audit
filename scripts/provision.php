@@ -149,12 +149,12 @@ out('profile fields: ' . json_encode($field_ids));
 $FIXTURE_PASSWORD = 'testpass123';
 
 $users = array(
-    // Active in this unit.
-    'unitmember' => array('usergroup' => 2, 'additionalgroups' => array($groups['unit']), 'legion_id' => 'TK-10001'),
+    // Active in this unit, so in both groups.
+    'unitmember' => array('usergroup' => 2, 'additionalgroups' => array($groups['unit'], $groups['legion']), 'legion_id' => 'TK-10001'),
     // Active in another unit.
     'legionmember' => array('usergroup' => 2, 'additionalgroups' => array($groups['legion']), 'legion_id' => 'TK-10002'),
     // Active in this unit and on its command staff.
-    'commander' => array('usergroup' => 2, 'additionalgroups' => array($groups['command'], $groups['unit']), 'legion_id' => 'TK-10003'),
+    'commander' => array('usergroup' => 2, 'additionalgroups' => array($groups['command'], $groups['unit'], $groups['legion']), 'legion_id' => 'TK-10003'),
     // Has never given a Legion ID, and is in neither group.
     'guestmember' => array('usergroup' => 2, 'additionalgroups' => array(), 'legion_id' => ''),
     // Spare members the specs set up however they need.

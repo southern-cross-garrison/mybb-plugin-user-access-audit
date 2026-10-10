@@ -1,8 +1,8 @@
 # MyBB Access Audit Plugin
 
-Checks every forum member's groups against their 501st Legion record. Members of your unit
-belong in your unit's group, members of other units belong in a 501st members group, and
-everybody else belongs in neither. The audit lists who is in the wrong place and fixes them
+Checks every forum member's groups against their 501st Legion record. Every active 501st
+member belongs in a 501st members group, members of your unit belong in your unit's group
+as well, and everybody else belongs in neither. The audit lists who is in the wrong place and fixes them
 one at a time, after you have looked.
 
 ## Features
@@ -50,13 +50,13 @@ the settings and the plugin's table too. Members' groups are never changed by ei
 
 Under Users & Groups -> Access Audit -> Settings:
 
-| Setting                 | What it does                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| 501st Legion API        | Where records are fetched from. Starts as `https://api.501st.com`.              |
-| Unit                    | Your garrison or outpost, from the 501st's own list of units.                   |
-| Legion ID profile field | The custom profile field that holds members' Legion IDs.                        |
-| Unit members group      | Where active members of your unit belong.                                       |
-| 501st members group     | Where active members of other units belong. Must not be the unit members group. |
+| Setting                 | What it does                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| 501st Legion API        | Where records are fetched from. Starts as `https://api.501st.com`.                                     |
+| Unit                    | Your garrison or outpost, from the 501st's own list of units.                                          |
+| Legion ID profile field | The custom profile field that holds members' Legion IDs.                                               |
+| Unit members group      | Where active members of your unit belong.                                                              |
+| 501st members group     | Where every active 501st member belongs, your unit's own included. Must not be the unit members group. |
 
 They also appear under Configuration -> Settings -> Access Audit, but as plain boxes; use
 the plugin's own tab, which offers the lists.
@@ -71,7 +71,7 @@ A Legion ID is read as its digits, so "TK-12345", "TK 12345" and "12345" are all
 | Is not Active on the 501st's records - Reserve, say  | Neither group           |
 | Has no public record                                 | Neither group           |
 | Is Active in another unit (an outpost is a unit too) | The 501st members group |
-| Is Active in your unit                               | The unit members group  |
+| Is Active in your unit                               | Both groups             |
 
 "No public record" is what the API says both for a member who has made their record private
 and for an ID that does not exist, and in practice it is mostly members who have left or

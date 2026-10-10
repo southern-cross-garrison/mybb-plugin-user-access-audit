@@ -1,8 +1,9 @@
 # MyBB Access Audit plugin
 
 Audits forum members' group access against the 501st Legion's API. Each member's Legion ID
-is looked up, and the Admin CP lists who should be in the unit members group, who should be
-in the 501st members group, and who should be in neither, with a Fix button for each. See
+is looked up, and the Admin CP lists who should be in the 501st members group, who should
+be in the unit members group as well, and who should be in neither, with a Fix button for
+each. See
 [PLUGIN.md](PLUGIN.md) for what the plugin does; this file covers the development
 environment and the test suite.
 
@@ -101,16 +102,16 @@ Members, which the audit manages, and Command Staff, which it must leave alone),
 ID profile field, and these members, and writes `test-forum/access-audit-fixtures.json`
 with their ids:
 
-| User                   | Legion ID | Groups                          | Usual stubbed record |
-| ---------------------- | --------- | ------------------------------- | -------------------- |
-| `admin`                | -         | Administrators (super admin)    |                      |
-| `staffadmin`           | -         | Administrators (not super)      |                      |
-| `unitmember`           | TK-10001  | Garrison Members                | Active, this unit    |
-| `legionmember`         | TK-10002  | 501st Members                   | Active, another unit |
-| `commander`            | TK-10003  | Command Staff, Garrison Members | Active, this unit    |
-| `guestmember`          | -         | -                               |                      |
-| `trooper1`, `trooper2` | TK-2000x  | -                               | Classified Record    |
-| `banned`               | TK-30001  | Banned, Garrison Members        | Active, this unit    |
+| User                   | Legion ID | Groups                                         | Usual stubbed record |
+| ---------------------- | --------- | ---------------------------------------------- | -------------------- |
+| `admin`                | -         | Administrators (super admin)                   |                      |
+| `staffadmin`           | -         | Administrators (not super)                     |                      |
+| `unitmember`           | TK-10001  | Garrison Members, 501st Members                | Active, this unit    |
+| `legionmember`         | TK-10002  | 501st Members                                  | Active, another unit |
+| `commander`            | TK-10003  | Command Staff, Garrison Members, 501st Members | Active, this unit    |
+| `guestmember`          | -         | -                                              |                      |
+| `trooper1`, `trooper2` | TK-2000x  | -                                              | Classified Record    |
+| `banned`               | TK-30001  | Banned, Garrison Members                       | Active, this unit    |
 
 `stubFixtureMembers()` stubs the usual records, which the provisioned groups all match.
 All users but `admin` share the password `testpass123`.

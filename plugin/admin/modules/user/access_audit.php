@@ -474,7 +474,22 @@ if(!$action)
         }
         $table->construct_cell($member_html, array('class' => 'access-audit-member'));
 
-        $table->construct_cell($member['legion_id'] !== '' ? htmlspecialchars_uni($member['legion_id']) : "<span class=\"access-audit-muted\">{$lang->access_audit_none}</span>", array('class' => 'access-audit-legion-id'));
+        // As the member typed it, linked by the number it was read as, so a mistyped ID is
+        // one click from showing whose it really is. Nothing to link when there is no number.
+        if($member['legion_id'] === '')
+        {
+            $legion_id_html = "<span class=\"access-audit-muted\">{$lang->access_audit_none}</span>";
+        }
+        elseif($result['legion_number'] > 0)
+        {
+            $legion_id_html = "<a href=\"https://501st.com/member/" . (int)$result['legion_number'] . "\" target=\"_blank\" rel=\"noopener noreferrer\">"
+                . htmlspecialchars_uni($member['legion_id']) . "</a>";
+        }
+        else
+        {
+            $legion_id_html = htmlspecialchars_uni($member['legion_id']);
+        }
+        $table->construct_cell($legion_id_html, array('class' => 'access-audit-legion-id'));
 
         // What the 501st says, and - when it has a public record - a link to it, so whoever
         // acts on the row can see the member's record for themselves first.
