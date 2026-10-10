@@ -1,0 +1,38 @@
+/* MyBB Access Audit Plugin - Admin CP styles */
+
+.access-audit-warning {
+	background: #fff6bf;
+	border: 1px solid #ffd324;
+	padding: 8px 10px;
+	margin-bottom: 10px;
+}
+
+.access-audit-warning ul {
+	margin: 6px 0 0;
+}
+
+.access-audit-error {
+	color: #c00;
+	font-weight: bold;
+}
+
+.access-audit-muted {
+	color: #888;
+}
+
+.access-audit-needs-fix .access-audit-change {
+	font-weight: bold;
+}
+
+.access-audit-fix {
+	white-space: nowrap;
+}
+
+.access-audit-legion-id {
+	white-space: nowrap;
+}
+
+.access-audit-shared {
+	color: #c00;
+	margin-top: 2px;
+}
