@@ -187,11 +187,10 @@ function access_audit_api_units($base = null)
 /**
  * One member's record, as the audit needs it, from a decoded /legionId/{id} response.
  *
- * @param int $legion_id
  * @param array $data
- * @return array 'status', 'garrison_id', 'garrison_name', 'name', 'profile_url'
+ * @return array 'status', 'garrison_id', 'garrison_name', 'name'
  */
-function access_audit_api_parse_member($legion_id, array $data)
+function access_audit_api_parse_member(array $data)
 {
     $status = isset($data['memberStatus']) && is_string($data['memberStatus']) ? trim($data['memberStatus']) : '';
 
@@ -204,16 +203,7 @@ function access_audit_api_parse_member($legion_id, array $data)
             'garrison_id'   => 0,
             'garrison_name' => '',
             'name'          => '',
-            'profile_url'   => '',
         );
-    }
-
-    // Shown as a link in the Admin CP, so only ever a web address - and the 501st's own
-    // address for the member when the API does not give one.
-    $profile_url = isset($data['profileUrl']) && is_string($data['profileUrl']) ? trim($data['profileUrl']) : '';
-    if(!preg_match('#^https?://[^\s"\'<>]+$#i', $profile_url))
-    {
-        $profile_url = 'https://www.501st.com/member/' . (int)$legion_id;
     }
 
     return array(
@@ -221,7 +211,6 @@ function access_audit_api_parse_member($legion_id, array $data)
         'garrison_id'   => isset($data['garrisonId']) && is_numeric($data['garrisonId']) ? (int)$data['garrisonId'] : 0,
         'garrison_name' => isset($data['garrisonName']) && is_string($data['garrisonName']) ? my_substr(trim($data['garrisonName']), 0, 255) : '',
         'name'          => my_substr(trim(preg_replace('/\s+/u', ' ', $data['fullName'])), 0, 255),
-        'profile_url'   => my_substr($profile_url, 0, 255),
     );
 }
 
@@ -279,7 +268,7 @@ function access_audit_api_fetch_members(array $legion_ids)
 
                 if($data !== null)
                 {
-                    $results[(int)$legion_id] = access_audit_api_parse_member((int)$legion_id, $data);
+                    $results[(int)$legion_id] = access_audit_api_parse_member($data);
                 }
 
                 unset($running_handles[$legion_id]);
@@ -338,7 +327,6 @@ function access_audit_lookup_members(array $legion_ids)
                 'garrison_id'   => (int)$row['garrison_id'],
                 'garrison_name' => $row['garrison_name'],
                 'name'          => $row['full_name'],
-                'profile_url'   => $row['profile_url'],
             );
         }
     }
@@ -361,7 +349,6 @@ function access_audit_lookup_members(array $legion_ids)
             'garrison_id'   => (int)$record['garrison_id'],
             'garrison_name' => $db->escape_string($record['garrison_name']),
             'full_name'     => $db->escape_string($record['name']),
-            'profile_url'   => $db->escape_string($record['profile_url']),
             'fetched_at'    => TIME_NOW,
         ));
     }

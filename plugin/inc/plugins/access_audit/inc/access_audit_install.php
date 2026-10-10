@@ -49,7 +49,8 @@ function access_audit_install_database()
 
     // What the 501st's API last said about each Legion ID, so that fixing one member and
     // coming back to the audit does not ask the API about every member again. Only real
-    // answers are kept: an API that was down is asked again next time.
+    // answers are kept: an API that was down is asked again next time. profile_url is
+    // dropped again by upgrade 0001.
     $db->write_query("CREATE TABLE IF NOT EXISTS `" . TABLE_PREFIX . "access_audit_lookups` (
         `legion_id` int(10) unsigned NOT NULL,
         `member_status` varchar(50) NOT NULL DEFAULT '',

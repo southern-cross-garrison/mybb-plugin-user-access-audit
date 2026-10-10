@@ -118,12 +118,12 @@ All users but `admin` share the password `testpass123`.
 
 ## What is covered
 
-| Spec           | Covers                                                                                                                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `audit`        | Every rule, Legion ID formats, the order, shared Legion IDs, the profile link, groups left alone, primary and display groups, the API down or answering nonsense, kept answers, fixing, escaping |
-| `settings`     | The units from the API, profile fields and groups, saving, validation, the API down, changing the API's address                                                                                  |
-| `permissions`  | "Can manage users?" opening and closing the page and the Fix action                                                                                                                              |
-| `plugin-setup` | What install creates, the menu entry, deactivating and reactivating, uninstall leaving nothing and members' groups alone, the shipped license copies                                             |
+| Spec           | Covers                                                                                                                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `audit`        | Every rule, Legion ID formats, the order, shared Legion IDs, the Legion ID link, the post count, groups left alone, primary and display groups, the API down or answering nonsense, kept answers, fixing, escaping |
+| `settings`     | The units from the API, profile fields and groups, saving, validation, the API down, changing the API's address                                                                                                    |
+| `permissions`  | "Can manage users?" opening and closing the page and the Fix action                                                                                                                                                |
+| `plugin-setup` | What install creates, schema upgrades on install and reactivation, the menu entry, deactivating and reactivating, uninstall leaving nothing and members' groups alone, the shipped license copies                  |
 
 ## Continuous integration
 

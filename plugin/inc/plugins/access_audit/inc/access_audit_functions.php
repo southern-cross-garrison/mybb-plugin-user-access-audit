@@ -132,8 +132,8 @@ function access_audit_config()
 }
 
 /**
- * The members to audit, with their groups and the Legion ID on their profile, in
- * username order.
+ * The members to audit, with their groups, post count and the Legion ID on their
+ * profile, in username order.
  *
  * @param array $config As access_audit_config()
  * @param int $uid Just this member; 0 for everybody
@@ -148,7 +148,7 @@ function access_audit_members(array $config, $uid = 0)
 
     $members = array();
     $query = $db->query("
-        SELECT u.uid, u.username, u.usergroup, u.additionalgroups, u.displaygroup, f.{$field} AS legion_id
+        SELECT u.uid, u.username, u.usergroup, u.additionalgroups, u.displaygroup, u.postnum, f.{$field} AS legion_id
         FROM " . TABLE_PREFIX . "users u
         LEFT JOIN " . TABLE_PREFIX . "userfields f ON (f.ufid = u.uid)
         {$where}

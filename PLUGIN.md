@@ -14,8 +14,10 @@ one at a time, after you have looked.
   group a member is in are left exactly as they are.
 - **One member at a time.** Each row has its own Fix button. There is deliberately no way to
   fix everybody at once: every change gives somebody access or takes it away.
-- **A link to their record.** When a member has a public record, the row links to it on
-  501st.com so you can check it before you press Fix.
+- **A link to their record.** Each member's Legion ID links to their page on 501st.com, so
+  you can check it before you press Fix.
+- **Their posts a click away.** Each row shows how many posts the member has made, linked to
+  a search of them, so you can see whether an account is really in use.
 - **Shared Legion IDs flagged.** Two accounts on the same Legion ID are noted on each other's
   rows, and the table is sorted by Legion ID so they sit together.
 - **Safe when the API is down.** A member the API could not answer for is shown as such, and

@@ -54,6 +54,7 @@ $l['access_audit_all_ok'] = "Every member's groups are correct.";
 $l['access_audit_no_members'] = "There are no members.";
 
 $l['access_audit_col_member'] = "Member";
+$l['access_audit_col_posts'] = "Posts";
 $l['access_audit_col_legion_id'] = "Legion ID";
 $l['access_audit_col_record'] = "501st record";
 $l['access_audit_col_groups'] = "In now";
@@ -67,7 +68,6 @@ $l['access_audit_record_no_legion_id'] = "No Legion ID on their profile";
 $l['access_audit_record_unchecked'] = "Could not reach the 501st Legion API";
 $l['access_audit_record_classified'] = "No public record - private, retired, or not a real Legion ID";
 $l['access_audit_record_banned'] = "Banned - MyBB restores their groups when the ban is lifted";
-$l['access_audit_view_profile'] = "View on 501st.com";
 $l['access_audit_shared_with'] = "Same Legion ID as {1}. Check which account is really theirs before fixing either.";
 
 $l['access_audit_change_add'] = "Add to {1}";

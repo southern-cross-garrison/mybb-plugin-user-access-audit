@@ -5,7 +5,7 @@ import { test, expect } from '../helpers/fixtures';
 import { gotoAudit, loginToAdminCp } from '../helpers/auth';
 import { REPO_ROOT } from '../helpers/config';
 import { runPhp } from '../helpers/container';
-import { fixtures, getGroups, query, T } from '../helpers/db';
+import { execute, fixtures, getGroups, lookups, query, T } from '../helpers/db';
 import { RowDataPacket } from 'mysql2/promise';
 
 /**
@@ -40,6 +40,12 @@ async function tableExists(name: string): Promise<boolean> {
 	return (await query<RowDataPacket>(`SHOW TABLES LIKE '${T(name)}'`)).length > 0;
 }
 
+async function columnNames(table: string): Promise<string[]> {
+	return (await query<RowDataPacket>(`SHOW COLUMNS FROM ${T(table)}`)).map((row) =>
+		String(row.Field)
+	);
+}
+
 /** Put the plugin back as provisioned, whatever a test left it as. */
 async function reinstall(): Promise<void> {
 	await runPhp(`
@@ -63,6 +69,51 @@ test('is installed with its table and settings', async ({ page }) => {
 
 	await page.goto('/admin/index.php?module=config-settings');
 	await expect(page.locator('#content')).toContainText('Access Audit');
+});
+
+test.describe('the schema', () => {
+	const DROP_PROFILE_URL = '0001_drop_lookups_profile_url';
+
+	test('is brought up to date by install', async () => {
+		expect(await columnNames('access_audit_lookups')).not.toContain('profile_url');
+		const applied = await query<RowDataPacket>(
+			`SELECT name FROM ${T('access_audit_schema_upgrades')}`
+		);
+		expect(applied.map((row) => row.name)).toContain(DROP_PROFILE_URL);
+	});
+
+	test('is brought up to date on a board that has an older one, by reactivating', async ({
+		page,
+	}) => {
+		// The board as an earlier release left it, with an answer kept.
+		await execute(
+			`ALTER TABLE ${T('access_audit_lookups')} ADD profile_url varchar(255) NOT NULL DEFAULT ''`
+		);
+		await execute(`DELETE FROM ${T('access_audit_schema_upgrades')} WHERE name = ?`, [
+			DROP_PROFILE_URL,
+		]);
+		await execute(
+			`INSERT INTO ${T('access_audit_lookups')} (legion_id, member_status, full_name, profile_url, fetched_at)
+			 VALUES (10001, 'Active', 'Fixture Trooper', 'https://www.501st.com/member/10001', UNIX_TIMESTAMP())`
+		);
+		try {
+			await clickPluginLink(page, 'Deactivate');
+			await clickPluginLink(page, 'Activate');
+
+			expect(await columnNames('access_audit_lookups')).not.toContain('profile_url');
+			const kept = await lookups();
+			expect(kept.map((row) => [row.legion_id, row.full_name])).toEqual([
+				[10001, 'Fixture Trooper'],
+			]);
+		} finally {
+			// Run again, as after a failure part way: it has to be safe either way.
+			await execute(`DELETE FROM ${T('access_audit_schema_upgrades')} WHERE name = ?`, [
+				DROP_PROFILE_URL,
+			]);
+			await reinstall();
+		}
+		expect(await columnNames('access_audit_lookups')).not.toContain('profile_url');
+	});
 });
 
 test('is under Users & Groups', async ({ page }) => {

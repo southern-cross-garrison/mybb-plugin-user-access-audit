@@ -1,6 +1,7 @@
 import { test, expect } from '../helpers/fixtures';
 import { loginToAdminCp } from '../helpers/auth';
 import { withSettings } from '../helpers/settings';
+import { BASE_URL } from '../helpers/config';
 import { counts, fix, fixButton, flash, openAudit, row } from '../helpers/audit';
 import {
 	BANNED,
@@ -156,8 +157,6 @@ test.describe('who belongs where', () => {
 		await expect(trooper.locator('.access-audit-record')).toHaveText(
 			'No public record - private, retired, or not a real Legion ID'
 		);
-		// There is nothing on 501st.com to look at.
-		await expect(trooper.locator('a.access-audit-profile')).toHaveCount(0);
 		await expect(trooper.locator('.access-audit-change')).toHaveText('Remove from 501st Members');
 
 		await fix(page, 'trooper1');
@@ -308,39 +307,53 @@ test.describe('the Legion ID', () => {
 	});
 });
 
-test.describe('the profile link', () => {
-	test('links an active member to their record on 501st.com', async ({ page }) => {
-		await setGroups('unitmember');
-		await openAudit(page);
+test.describe('the post count', () => {
+	test("links to a search of the member's posts, when they have any", async ({ page }) => {
+		const setPosts = (postnum: number) =>
+			execute(`UPDATE ${T('users')} SET postnum = ? WHERE uid = ?`, [postnum, uid('trooper1')]);
+		// The per-test reset puts groups back, not post counts.
+		await setPosts(1234);
+		try {
+			await openAudit(page, { all: true });
 
-		const link = row(page, 'unitmember').locator('a.access-audit-profile');
-		await expect(link).toHaveText('View on 501st.com');
-		await expect(link).toHaveAttribute('href', 'https://www.501st.com/member/10001');
-		await expect(link).toHaveAttribute('target', '_blank');
-		await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+			const posts = row(page, 'trooper1').locator('.access-audit-posts a');
+			await expect(posts).toHaveText('1,234');
+			await expect(posts).toHaveAttribute(
+				'href',
+				`${BASE_URL}/search.php?action=finduser&uid=${uid('trooper1')}`
+			);
+			await expect(posts).toHaveAttribute('target', '_blank');
+
+			// A search for no posts finds nothing, so there is nothing to link.
+			await expect(row(page, 'trooper2').locator('.access-audit-posts')).toHaveText('0');
+			await expect(row(page, 'trooper2').locator('.access-audit-posts a')).toHaveCount(0);
+		} finally {
+			await setPosts(0);
+		}
 	});
+});
 
-	test('links a Reserve member too, before their access is taken away', async ({ page }) => {
-		stubLegionApi(10001, legionApiMember(10001, { status: 'Reserve' }));
-		await openAudit(page);
-
-		await expect(row(page, 'unitmember').locator('a.access-audit-profile')).toHaveAttribute(
-			'href',
-			'https://www.501st.com/member/10001'
-		);
-	});
-
-	test('falls back to the 501st address when the API gives no usable one', async ({ page }) => {
-		const record = legionApiMember(10001, { unit: OTHER_UNIT }) as {
+test.describe('the 501st record', () => {
+	test('shows the name with no link of its own: the Legion ID is the way to 501st.com', async ({
+		page,
+	}) => {
+		// Whatever profile address the API gives is kept, but not linked.
+		const record = legionApiMember(10001, { status: 'Reserve' }) as {
 			body: Record<string, unknown>;
 		};
 		stubLegionApi(10001, { body: { ...record.body, profileUrl: 'javascript:alert(1)' } });
 		await openAudit(page);
 
-		await expect(row(page, 'unitmember').locator('a.access-audit-profile')).toHaveAttribute(
+		const member = row(page, 'unitmember');
+		await expect(member.locator('.access-audit-record')).toContainText('Reserve');
+		await expect(member.locator('.access-audit-record')).toContainText('Fixture Trooper');
+		await expect(member.locator('.access-audit-record a')).toHaveCount(0);
+		await expect(member.locator('a[href*="501st.com"]')).toHaveCount(1);
+		await expect(member.locator('.access-audit-legion-id a')).toHaveAttribute(
 			'href',
-			'https://www.501st.com/member/10001'
+			'https://501st.com/member/10001'
 		);
+		await expect(page.locator('a[href^="javascript"]')).toHaveCount(0);
 	});
 });
 

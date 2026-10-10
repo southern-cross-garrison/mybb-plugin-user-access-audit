@@ -441,6 +441,7 @@ if(!$action)
 
     $table = new Table;
     $table->construct_header($lang->access_audit_col_member);
+    $table->construct_header($lang->access_audit_col_posts, array('class' => 'align_center', 'width' => '1'));
     $table->construct_header($lang->access_audit_col_legion_id);
     $table->construct_header($lang->access_audit_col_record);
     $table->construct_header($lang->access_audit_col_groups);
@@ -474,8 +475,24 @@ if(!$action)
         }
         $table->construct_cell($member_html, array('class' => 'access-audit-member'));
 
-        // As the member typed it, linked by the number it was read as, so a mistyped ID is
-        // one click from showing whose it really is. Nothing to link when there is no number.
+        // Linked to a search of their posts on the board, so whether an account is really
+        // used - and by whom - can be seen before acting on it. A search for nobody's posts
+        // only says it found none, so a member without any has nothing to link.
+        $postnum = (int)$member['postnum'];
+        if($postnum > 0)
+        {
+            $posts_html = "<a href=\"" . htmlspecialchars_uni($mybb->settings['bburl']) . "/search.php?action=finduser&amp;uid={$uid}\" target=\"_blank\" rel=\"noopener\">"
+                . my_number_format($postnum) . "</a>";
+        }
+        else
+        {
+            $posts_html = "<span class=\"access-audit-muted\">0</span>";
+        }
+        $table->construct_cell($posts_html, array('class' => 'access-audit-posts align_center'));
+
+        // As the member typed it, linked to their record on 501st.com by the number it was
+        // read as, so whoever acts on the row can look at the record first - and a mistyped
+        // ID is one click from showing whose it really is. Nothing to link without a number.
         if($member['legion_id'] === '')
         {
             $legion_id_html = "<span class=\"access-audit-muted\">{$lang->access_audit_none}</span>";
@@ -491,8 +508,7 @@ if(!$action)
         }
         $table->construct_cell($legion_id_html, array('class' => 'access-audit-legion-id'));
 
-        // What the 501st says, and - when it has a public record - a link to it, so whoever
-        // acts on the row can see the member's record for themselves first.
+        // What the 501st says. The record itself is a click away on the Legion ID.
         switch($result['verdict'])
         {
             case ACCESS_AUDIT_BANNED:
@@ -520,7 +536,6 @@ if(!$action)
                     {
                         $record_html .= "<br /><span class=\"smalltext\">" . htmlspecialchars_uni($record['name']) . "</span>";
                     }
-                    $record_html .= "<br /><a href=\"" . htmlspecialchars_uni($record['profile_url']) . "\" class=\"access-audit-profile smalltext\" target=\"_blank\" rel=\"noopener noreferrer\">{$lang->access_audit_view_profile}</a>";
                 }
         }
         $table->construct_cell($record_html, array('class' => 'access-audit-record'));
@@ -572,7 +587,7 @@ if(!$action)
 
     if($table->num_rows() == 0)
     {
-        $table->construct_cell($show_all ? $lang->access_audit_no_members : $lang->access_audit_all_ok, array('colspan' => 6, 'id' => 'access_audit_empty'));
+        $table->construct_cell($show_all ? $lang->access_audit_no_members : $lang->access_audit_all_ok, array('colspan' => 7, 'id' => 'access_audit_empty'));
         $table->construct_row();
     }
 
