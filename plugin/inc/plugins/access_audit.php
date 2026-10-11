@@ -38,7 +38,7 @@ function access_audit_info()
         "website"       => "https://github.com/southern-cross-garrison/mybb-plugin-user-access-audit",
         "author"        => "Kevin Brown (TK-33151)",
         "authorsite"    => "https://www.501scg.org/",
-        "version"       => "1.0.3",
+        "version"       => "1.1.0",
         "guid"          => "85f3ee26-1f34-4aeb-81ce-a7366de69a85",
         "codename"      => "access_audit",
         "compatibility" => "18*"
