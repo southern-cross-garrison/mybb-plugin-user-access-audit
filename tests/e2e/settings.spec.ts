@@ -9,6 +9,7 @@ import {
 	OUTPOST,
 	OTHER_SQUAD,
 	SQUAD,
+	UNAUDITED_SQUAD,
 	legionApiMember,
 	legionApiRequests,
 	squadsDown,
@@ -22,20 +23,22 @@ import {
 
 /**
  * Users & Groups -> Access Audit -> Settings: the unit, picked from the 501st API's list;
- * the Legion ID profile field; the three groups the audit manages; and the squads, each
- * picked from the API's list with a group of its own.
+ * the Legion ID profile field; the three groups the audit manages; and the squads, a row for
+ * each of the unit's in the API's list, each given a group of its own.
  */
 const save = (page: import('@playwright/test').Page) =>
 	page.locator('#access_audit_save_settings').click();
 
 /**
- * Take a squad row off. The squads offered are the unit's, so changing the unit means
+ * Take a squad off. Only the unit's squads can be audited, so changing the unit means
  * taking off the provisioned squad, which is this unit's.
  */
-const clearSquad = async (page: import('@playwright/test').Page, row = 0) => {
-	await page.locator(`#squad_${row}`).selectOption('0');
-	await page.locator(`#squad_group_${row}`).selectOption('0');
-};
+const clearSquad = (page: import('@playwright/test').Page, squad = SQUAD) =>
+	page.locator(`#squad_group_${squad.id}`).selectOption('0');
+
+/** The squads' names, as listed in the table's rows. */
+const squadRows = (page: import('@playwright/test').Page) =>
+	page.locator('tr.access-audit-squad-row td:first-child');
 
 test.beforeEach(async ({ page }) => {
 	await loginToAdminCp(page);
@@ -271,30 +274,24 @@ test('counts a deleted profile field or group as not chosen', async ({ page }) =
 test.describe('squads', () => {
 	const squads = async () => JSON.parse((await getSetting('access_audit_squads')) || '[]');
 
-	test("offers the unit's own squads by name, with the board's chosen and spare rows", async ({
-		page,
-	}) => {
+	test("lists the unit's own squads by name, each with its group", async ({ page }) => {
 		await gotoAuditSettings(page);
 
-		// Not Snowy Range Squad, whose officer is in another unit.
-		await expect(page.locator('#squad_0 option')).toHaveText([
-			'Choose...',
-			'Hunter Valley Squad',
-			'Illawarra Squad',
-		]);
-		await expect(page.locator('#squad_0')).toHaveValue(String(SQUAD.id));
-		await expect(page.locator('#squad_group_0')).toHaveValue(String(fixtures().groups.squad));
-		await expect(page.locator('tr.access-audit-squad-row')).toHaveCount(4);
-		for (const spare of [1, 2, 3]) {
-			await expect(page.locator(`#squad_${spare}`)).toHaveValue('0');
-			await expect(page.locator(`#squad_group_${spare}`)).toHaveValue('0');
-		}
+		// Not Snowy Range Squad, whose officer is in another unit, and no spare rows: there
+		// is no squad to add that is not listed already.
+		await expect(squadRows(page)).toHaveText(['Hunter Valley Squad', 'Illawarra Squad']);
+		await expect(page.locator(`#squad_group_${SQUAD.id}`)).toHaveValue(
+			String(fixtures().groups.squad)
+		);
+		await expect(page.locator(`#squad_group_${OTHER_SQUAD.id}`)).toHaveValue('0');
+		await expect(page.locator('#content')).not.toContainText("not one of this unit's squads");
 	});
 
 	test('adds a squad, keeping its name, and the audit goes by it', async ({ page }) => {
 		await gotoAuditSettings(page);
-		await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
-		await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+		await page
+			.locator(`#squad_group_${OTHER_SQUAD.id}`)
+			.selectOption(String(fixtures().groups.otherSquad));
 		await save(page);
 
 		await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
@@ -303,7 +300,7 @@ test.describe('squads', () => {
 			// Trimmed of the API's stray space.
 			{ squad: OTHER_SQUAD.id, name: OTHER_SQUAD.name, group: fixtures().groups.otherSquad },
 		]);
-		await expect(page.locator('tr.access-audit-squad-row')).toHaveCount(5);
+		await expect(squadRows(page)).toHaveText(['Hunter Valley Squad', 'Illawarra Squad']);
 
 		await openAudit(page);
 		await expect(page.locator('#access_audit_rules')).toContainText(
@@ -313,17 +310,20 @@ test.describe('squads', () => {
 
 	test('takes a squad off when it is set back to Choose...', async ({ page }) => {
 		await gotoAuditSettings(page);
-		await page.locator('#squad_0').selectOption('0');
-		await page.locator('#squad_group_0').selectOption('0');
+		await clearSquad(page);
 		await save(page);
 
 		await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
 		expect(await getSetting('access_audit_squads')).toBe('');
+		// Still listed, to be chosen again.
+		await expect(squadRows(page)).toHaveText(['Hunter Valley Squad', 'Illawarra Squad']);
 	});
 
 	test('moves a squad to another group', async ({ page }) => {
 		await gotoAuditSettings(page);
-		await page.locator('#squad_group_0').selectOption(String(fixtures().groups.otherSquad));
+		await page
+			.locator(`#squad_group_${SQUAD.id}`)
+			.selectOption(String(fixtures().groups.otherSquad));
 		await save(page);
 
 		expect(await squads()).toEqual([
@@ -333,51 +333,38 @@ test.describe('squads', () => {
 
 	const refusals: [string, string, (page: import('@playwright/test').Page) => Promise<void>][] = [
 		[
-			'a squad without a group',
-			'Choose both a squad and its group, or neither.',
-			async (page) => {
-				await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
-			},
-		],
-		[
-			'a group without a squad',
-			'Choose both a squad and its group, or neither.',
-			async (page) => {
-				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
-			},
-		],
-		[
-			'the same squad twice',
-			'Each squad can only be chosen once.',
-			async (page) => {
-				await page.locator('#squad_1').selectOption(String(SQUAD.id));
-				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
-			},
-		],
-		[
 			"one of the other three groups as a squad's",
 			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members and 501st members groups.",
 			async (page) => {
-				await page.locator('#squad_group_0').selectOption(String(fixtures().groups.legion));
+				await page
+					.locator(`#squad_group_${SQUAD.id}`)
+					.selectOption(String(fixtures().groups.legion));
 			},
 		],
 		[
 			'two squads in one group',
 			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members and 501st members groups.",
 			async (page) => {
-				await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
-				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.squad));
+				await page
+					.locator(`#squad_group_${OTHER_SQUAD.id}`)
+					.selectOption(String(fixtures().groups.squad));
 			},
 		],
 		[
 			"another unit's squad",
-			"Choose squads of this board's unit. If the unit has just been changed, take its old squads off first.",
+			"Only squads of this board's unit can be audited. Set the ones that are not back to Choose...",
 			async (page) => {
-				await page.locator('#squad_1').evaluate((select: HTMLSelectElement) => {
-					select.add(new Option('Snowy Range Squad', '102'));
-					select.value = '102';
-				});
-				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+				// Not listed, so posted by hand.
+				await page.locator(`#squad_group_${OTHER_SQUAD.id}`).evaluate(
+					(select: HTMLSelectElement, [id, group]) => {
+						const other = select.cloneNode(true) as HTMLSelectElement;
+						other.id = `squad_group_${id}`;
+						other.name = `squad_group[${id}]`;
+						other.value = String(group);
+						select.form!.appendChild(other);
+					},
+					[UNAUDITED_SQUAD.id, fixtures().groups.otherSquad]
+				);
 			},
 		],
 	];
@@ -393,31 +380,36 @@ test.describe('squads', () => {
 		});
 	}
 
-	test('keeps what was chosen in each row when the form comes back with an error', async ({
-		page,
-	}) => {
+	test("keeps each squad's group when the form comes back with an error", async ({ page }) => {
 		await gotoAuditSettings(page);
-		await page.locator('#squad_2').selectOption(String(OTHER_SQUAD.id));
+		await page
+			.locator(`#squad_group_${OTHER_SQUAD.id}`)
+			.selectOption(String(fixtures().groups.legion));
 		await save(page);
 
-		await expect(page.locator('.error')).toContainText(
-			'Choose both a squad and its group, or neither.'
+		await expect(page.locator('.error')).toContainText('Each squad needs a group of its own');
+		await expect(squadRows(page)).toHaveText(['Hunter Valley Squad', 'Illawarra Squad']);
+		await expect(page.locator(`#squad_group_${SQUAD.id}`)).toHaveValue(
+			String(fixtures().groups.squad)
 		);
-		// The spare row left empty is gone, and the half-chosen one is kept.
-		await expect(page.locator('#squad_0')).toHaveValue(String(SQUAD.id));
-		await expect(page.locator('#squad_1')).toHaveValue(String(OTHER_SQUAD.id));
-		await expect(page.locator('#squad_group_1')).toHaveValue('0');
+		await expect(page.locator(`#squad_group_${OTHER_SQUAD.id}`)).toHaveValue(
+			String(fixtures().groups.legion)
+		);
 	});
 
 	test('passes over an officer whose record puts them in another squad', async ({ page }) => {
 		stubLegionApi(40001, legionApiMember(40001, { squad: OTHER_SQUAD }));
 		await gotoAuditSettings(page);
 
-		// Hunter Valley Squad's only officer cannot place it.
-		await expect(page.locator('#squad_1 option')).toHaveText(['Choose...', 'Illawarra Squad']);
+		// Hunter Valley Squad's only officer cannot place it, so it is no longer the unit's -
+		// but it is still chosen, so it is shown as such rather than dropped without a word.
+		await expect(squadRows(page)).toHaveText([
+			'Illawarra Squad',
+			"Hunter Valley Squad (not one of this unit's squads)",
+		]);
 	});
 
-	test("offers a new unit's squads once it is saved, and will not keep the old unit's", async ({
+	test("lists a new unit's squads once it is saved, and will not keep the old unit's", async ({
 		page,
 	}) => {
 		await gotoAuditSettings(page);
@@ -425,15 +417,20 @@ test.describe('squads', () => {
 		await save(page);
 
 		await expect(page.locator('.error')).toContainText(
-			"Choose squads of this board's unit. If the unit has just been changed, take its old squads off first."
+			"Only squads of this board's unit can be audited. Set the ones that are not back to Choose..."
 		);
 		expect(await getSetting('access_audit_unit')).toBe(String(OUR_UNIT.id));
+		// The new unit's, and the old one's still chosen, to be taken off.
+		await expect(squadRows(page)).toHaveText([
+			'Snowy Range Squad',
+			"Hunter Valley Squad (not one of this unit's squads)",
+		]);
 
 		await clearSquad(page);
 		await save(page);
 
 		await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
-		await expect(page.locator('#squad_0 option')).toHaveText(['Choose...', 'Snowy Range Squad']);
+		await expect(squadRows(page)).toHaveText(['Snowy Range Squad']);
 	});
 
 	test('says when the unit has no squads', async ({ page }) => {
@@ -445,7 +442,7 @@ test.describe('squads', () => {
 		await expect(page.locator('#access_audit_squads_none')).toHaveText(
 			"The 501st's records show no squads in this unit."
 		);
-		await expect(page.locator('#squad_0 option')).toHaveText(['Choose...']);
+		await expect(page.locator('tr.access-audit-squad-row')).toHaveCount(0);
 	});
 
 	test.describe('while the API is down', () => {
@@ -456,16 +453,18 @@ test.describe('squads', () => {
 			await gotoAuditSettings(page);
 
 			await expect(page.locator('#access_audit_squads_unavailable')).toBeVisible();
-			await expect(page.locator('#squad_0 option')).toHaveText(['Choose...', SQUAD.name]);
+			await expect(squadRows(page)).toHaveText([SQUAD.name]);
 		});
 
-		test('says so, and still offers and saves the squads already chosen', async ({ page }) => {
+		test('says so, and still lists and saves the squads already chosen', async ({ page }) => {
 			squadsDown();
 			await gotoAuditSettings(page);
 
 			await expect(page.locator('#access_audit_squads_unavailable')).toBeVisible();
-			await expect(page.locator('#squad_0 option')).toHaveText(['Choose...', SQUAD.name]);
-			await page.locator('#squad_group_0').selectOption(String(fixtures().groups.otherSquad));
+			await expect(squadRows(page)).toHaveText([SQUAD.name]);
+			await page
+				.locator(`#squad_group_${SQUAD.id}`)
+				.selectOption(String(fixtures().groups.otherSquad));
 			await save(page);
 
 			await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
@@ -477,8 +476,9 @@ test.describe('squads', () => {
 		test('cannot add a squad', async ({ page }) => {
 			await gotoAuditSettings(page);
 			squadsDown();
-			await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
-			await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+			await page
+				.locator(`#squad_group_${OTHER_SQUAD.id}`)
+				.selectOption(String(fixtures().groups.otherSquad));
 			await save(page);
 
 			await expect(page.locator('.error')).toContainText(

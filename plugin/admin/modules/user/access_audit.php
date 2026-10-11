@@ -177,17 +177,16 @@ if($action == "settings")
             'squads'        => array(),
         );
 
-        // One row per squad, as squads[n][squad] and squads[n][group]. A row with neither
-        // chosen is a spare one left empty, or a squad taken off the list.
-        foreach($mybb->get_input('squads', MyBB::INPUT_ARRAY) as $row)
+        // One row per squad, as squad_group[squad id] => group. A squad left at Choose... is
+        // one not audited, or taken off.
+        foreach($mybb->get_input('squad_group', MyBB::INPUT_ARRAY) as $id => $group)
         {
-            $row = is_array($row) ? $row : array();
             $squad_row = array(
-                'squad' => isset($row['squad']) && is_scalar($row['squad']) ? (int)$row['squad'] : 0,
+                'squad' => (int)$id,
                 'name'  => '',
-                'group' => isset($row['group']) && is_scalar($row['group']) ? (int)$row['group'] : 0,
+                'group' => is_scalar($group) ? (int)$group : 0,
             );
-            if($squad_row['squad'] > 0 || $squad_row['group'] > 0)
+            if($squad_row['squad'] > 0 && $squad_row['group'] > 0)
             {
                 $values['squads'][] = $squad_row;
             }
@@ -293,12 +292,6 @@ if($action == "settings")
         $chosen_squads = array();
         foreach($values['squads'] as $squad_row)
         {
-            if($squad_row['squad'] <= 0 || $squad_row['group'] <= 0)
-            {
-                $squad_errors['incomplete'] = $lang->access_audit_error_squad_incomplete;
-                continue;
-            }
-
             if($squads !== null)
             {
                 // Which squads are the unit's means nothing until there is a unit, and it
@@ -328,12 +321,6 @@ if($action == "settings")
             if(!isset($groups[$squad_row['group']]))
             {
                 $squad_errors['group'] = $lang->access_audit_error_squad_group;
-                continue;
-            }
-
-            if(isset($chosen_squads[$squad_row['squad']]))
-            {
-                $squad_errors['twice'] = $lang->access_audit_error_same_squad;
                 continue;
             }
 
@@ -468,19 +455,32 @@ if($action == "settings")
 
     $container->end();
 
-    $squad_options = array(0 => $lang->access_audit_choose);
-    if($squads !== null)
+    // A row for each of the unit's squads. Without the list there are still the squads
+    // already saved, so they can be kept, moved to another group or taken off while the API
+    // is down.
+    $squad_rows = array();
+    foreach($squads !== null ? $squads : $saved_squads as $id => $squad)
     {
-        $squad_options += $squads;
+        $squad_rows[$id] = array(
+            'name'  => is_array($squad) ? access_audit_squad_name($squad) : $squad,
+            'group' => 0,
+            'other' => false,
+        );
     }
-    else
+    // Then any squad chosen that is not among them - the old unit's, when the unit is being
+    // changed - so it can be seen and taken off rather than dropped without a word.
+    foreach($values['squads'] as $squad_row)
     {
-        // Without the list there are still the squads already saved, so they can be kept,
-        // moved to another group or taken off while the API is down.
-        foreach($saved_squads as $id => $squad)
+        $id = $squad_row['squad'];
+        if(!isset($squad_rows[$id]))
         {
-            $squad_options[$id] = access_audit_squad_name($squad);
+            $squad_rows[$id] = array(
+                'name'  => isset($saved_squads[$id]) ? access_audit_squad_name($saved_squads[$id]) : '#' . $id,
+                'group' => 0,
+                'other' => true,
+            );
         }
+        $squad_rows[$id]['group'] = $squad_row['group'];
     }
 
     $squad_table = new Table;
@@ -503,18 +503,16 @@ if($action == "settings")
     $squad_table->construct_cell($squad_note . $lang->access_audit_squads_desc, array('colspan' => 2));
     $squad_table->construct_row();
 
-    // The squads chosen, then a few empty rows to add more with. There is no script to add
-    // rows: saving brings up fresh empty ones.
-    $squad_rows = $values['squads'];
-    for($spare = 0; $spare < 3; $spare++)
+    foreach($squad_rows as $id => $squad_row)
     {
-        $squad_rows[] = array('squad' => 0, 'group' => 0);
-    }
-    foreach($squad_rows as $index => $squad_row)
-    {
-        $squad_table->construct_cell($form->generate_select_box("squads[{$index}][squad]", $squad_options, $squad_row['squad'], array('id' => "squad_{$index}")));
-        $squad_table->construct_cell($form->generate_select_box("squads[{$index}][group]", $group_options, $squad_row['group'], array('id' => "squad_group_{$index}")));
-        $squad_table->construct_row(array('class' => 'access-audit-squad-row'));
+        $name = "<label for=\"squad_group_{$id}\">" . htmlspecialchars_uni($squad_row['name']) . "</label>";
+        if($squad_row['other'])
+        {
+            $name .= " <span class=\"access-audit-muted\">{$lang->access_audit_squad_not_unit}</span>";
+        }
+        $squad_table->construct_cell($name);
+        $squad_table->construct_cell($form->generate_select_box("squad_group[{$id}]", $group_options, $squad_row['group'], array('id' => "squad_group_{$id}")));
+        $squad_table->construct_row(array('class' => 'access-audit-squad-row', 'id' => "squad_{$id}"));
     }
     $squad_table->output($lang->access_audit_squads);
 

@@ -67,18 +67,16 @@ The three groups must all be different groups.
 
 ### Squads
 
-Below those, the **Squads** table pairs squads with groups, one squad per row. Pick one of your
-unit's squads and the group its Active members belong in. Squads are optional and
-come on top of the rules above. Choose a squad and its group in an empty row to add one, and
-set a squad back to Choose... to stop auditing it. Three empty rows are offered each time,
-and saving brings up more.
+Below those, the **Squads** table lists your unit's squads, one per row, each with the group its
+Active members belong in. Squads are optional and come on top of the rules above. Choose a
+squad's group to audit it, and set it back to Choose... to stop auditing it.
 
 Each squad's group must be a group of its own, not another squad's and not one of the three
-groups above. Only the squads of the unit saved above are offered. The 501st's list of squads does not
+groups above. Only the squads of the unit saved above are listed. The 501st's list of squads does not
 say which unit each belongs to, so the plugin looks up each squad's officers and goes by the
 unit on their records. A squad with no officer on a public record cannot be placed, and is
-not offered. If you change the unit, take the old unit's squads off in the same save; the new
-unit's squads are offered once it is saved.
+not listed. If you change the unit, saving lists the new unit's squads, along with the old
+unit's that still have a group; set those back to Choose... to save the change.
 
 While the API is down, the squads already chosen can still be kept, moved to another group or
 taken off, but new ones cannot be added.
