@@ -52,7 +52,7 @@ baseline from a restored database, so the last test run's leftovers are not bake
   the suite on both. Write for 7.4 - no `str_contains()`, `match`, `?->`, named arguments
   or other 8.x additions - and for 8's strictness: every test fails on a logged warning.
   Run the suite on `PHP_VERSION=8.5` before calling a change done.
-- The audit only ever changes the two configured groups. Anything else a member is in is
+- The audit only ever changes the three configured groups (unit, reserve and 501st members). Anything else a member is in is
   none of its business, and `access_audit_plan()` is where that is kept true - every change
   to group handling goes through it and gets a test in `audit.spec.ts`.
 - There is deliberately no "fix everybody" action. Each fix is a person gaining or losing

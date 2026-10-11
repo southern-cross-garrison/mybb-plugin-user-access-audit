@@ -28,15 +28,15 @@ import {
 
 /**
  * The audit: every member judged by their Legion ID's 501st record, and their membership
- * of the two audited groups fixed one row at a time.
+ * of the three audited groups fixed one row at a time.
  *
  * Provisioned members and the records stubFixtureMembers() gives them:
  *   unitmember   TK-10001  Active, this unit       Garrison Members, 501st Members
  *   legionmember TK-10002  Active, another unit    501st Members
  *   commander    TK-10003  Active, this unit       Command Staff, Garrison Members, 501st Members
- *   guestmember  -                                 neither
- *   trooper1     TK-20001  Classified Record       neither
- *   trooper2     TK-20002  Classified Record       neither
+ *   guestmember  -                                 none
+ *   trooper1     TK-20001  Classified Record       none
+ *   trooper2     TK-20002  Classified Record       none
  *   banned       TK-30001  Active, this unit       Banned, Garrison Members
  *   admin, staffadmin  -                           Administrators
  */
@@ -79,7 +79,7 @@ test.describe('the audit', () => {
 		await openAudit(page);
 
 		await expect(page.locator('#content')).toContainText(
-			'Active members of Southern Cross Garrison belong in both Garrison Members and 501st Members. Active members of any other unit belong in 501st Members only.'
+			'Active members of Southern Cross Garrison belong in both Garrison Members and 501st Members, and its Reserve members in both Garrison Reserve and 501st Members. Active and Reserve members of any other unit belong in 501st Members only.'
 		);
 	});
 
@@ -134,19 +134,112 @@ test.describe('who belongs where', () => {
 		await expect(row(page, 'guestmember')).toHaveCount(0);
 	});
 
-	test('a Reserve member belongs in neither group', async ({ page }) => {
+	test('a member of this unit gone to the reserve moves to the reserve members group', async ({
+		page,
+	}) => {
 		stubLegionApi(10001, legionApiMember(10001, { status: 'Reserve', fullName: 'Unit Member' }));
 		await openAudit(page);
 
 		const member = row(page, 'unitmember');
 		await expect(member.locator('.access-audit-status')).toHaveText('Reserve');
 		await expect(member.locator('.access-audit-unit')).toHaveText('Southern Cross Garrison');
+		// Still a 501st member, so that group stays.
 		await expect(member.locator('.access-audit-change')).toHaveText(
-			'Remove from Garrison Members; Remove from 501st Members'
+			'Add to Garrison Reserve; Remove from Garrison Members'
+		);
+
+		await fix(page, 'unitmember');
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: REGISTERED,
+			additionalgroups: [groups().legion, groups().reserve].sort((a, b) => a - b),
+			displaygroup: 0,
+		});
+	});
+
+	test('a Reserve member of this unit in neither group joins the reserve and 501st members groups', async ({
+		page,
+	}) => {
+		await setGroups('unitmember');
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Reserve' }));
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Reserve; Add to 501st Members'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual(
+			[groups().reserve, groups().legion].sort((a, b) => a - b)
+		);
+	});
+
+	test('a Reserve member of this unit in the right groups needs nothing', async ({ page }) => {
+		await setGroups('unitmember', { additionalgroups: [groups().reserve, groups().legion] });
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Reserve' }));
+		await openAudit(page, { all: true });
+
+		await expect(row(page, 'unitmember').locator('.access-audit-groups')).toHaveText(
+			'Garrison Reserve501st Members'
+		);
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText('Nothing');
+	});
+
+	test('a member of this unit back from the reserve leaves the reserve members group', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', { additionalgroups: [groups().reserve, groups().legion] });
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Members; Remove from Garrison Reserve'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual(
+			[groups().unit, groups().legion].sort((a, b) => a - b)
+		);
+	});
+
+	test('a Reserve member of another unit belongs in the 501st members group only', async ({
+		page,
+	}) => {
+		stubLegionApi(10002, legionApiMember(10002, { status: 'Reserve', unit: OTHER_UNIT }));
+		await openAudit(page, { all: true });
+
+		// As legionmember is provisioned: nothing to change.
+		await expect(row(page, 'legionmember').locator('.access-audit-change')).toHaveText('Nothing');
+
+		// The reserve members group is this unit's own reserve, not anybody's.
+		await setGroups('legionmember', { additionalgroups: [groups().reserve] });
+		await openAudit(page);
+		await expect(row(page, 'legionmember').locator('.access-audit-change')).toHaveText(
+			'Add to 501st Members; Remove from Garrison Reserve'
+		);
+		await fix(page, 'legionmember');
+		expect((await getGroups('legionmember')).additionalgroups).toEqual([groups().legion]);
+	});
+
+	test('a member neither Active nor Reserve belongs in none of the groups', async ({ page }) => {
+		await setGroups('unitmember', {
+			additionalgroups: [groups().unit, groups().reserve, groups().legion],
+		});
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired' }));
+		await openAudit(page);
+
+		const member = row(page, 'unitmember');
+		await expect(member.locator('.access-audit-status')).toHaveText('Retired');
+		await expect(member.locator('.access-audit-change')).toHaveText(
+			'Remove from Garrison Members; Remove from Garrison Reserve; Remove from 501st Members'
 		);
 
 		await fix(page, 'unitmember');
 		expect((await getGroups('unitmember')).additionalgroups).toEqual([]);
+	});
+
+	test('a member in none of the groups says so', async ({ page }) => {
+		await openAudit(page, { all: true });
+
+		await expect(row(page, 'guestmember').locator('.access-audit-groups')).toHaveText(
+			'None of them'
+		);
 	});
 
 	test('a member with no public record belongs in neither group', async ({ page }) => {
@@ -419,6 +512,50 @@ test.describe('a primary group taken away', () => {
 			usergroup: groups().legion,
 			additionalgroups: [groups().command],
 			// Back to showing the primary group.
+			displaygroup: 0,
+		});
+	});
+
+	test('becomes the reserve members group for a member of this unit gone to the reserve', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			usergroup: groups().unit,
+			additionalgroups: [groups().legion],
+			displaygroup: groups().unit,
+		});
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Reserve' }));
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Reserve; Remove from Garrison Members; Primary group becomes Garrison Reserve'
+		);
+
+		await fix(page, 'unitmember');
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: groups().reserve,
+			additionalgroups: [groups().legion],
+			displaygroup: 0,
+		});
+	});
+
+	test('becomes the unit members group for a member of this unit back from the reserve', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			usergroup: groups().reserve,
+			additionalgroups: [groups().legion],
+		});
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Members; Remove from Garrison Reserve; Primary group becomes Garrison Members'
+		);
+
+		await fix(page, 'unitmember');
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: groups().unit,
+			additionalgroups: [groups().legion],
 			displaygroup: 0,
 		});
 	});
@@ -772,13 +909,21 @@ test.describe('escaping', () => {
 
 test.describe('before it is set up', () => {
 	test('says what is missing and links to the settings', async ({ page }) => {
-		const restore = await withSettings({ access_audit_unit: '', access_audit_legion_group: '' });
+		const restore = await withSettings({
+			access_audit_unit: '',
+			access_audit_reserve_group: '',
+			access_audit_legion_group: '',
+		});
 		try {
 			await page.goto('/admin/index.php?module=user-access_audit');
 
 			const notice = page.locator('#access_audit_not_configured');
 			await expect(notice).toContainText('The audit cannot run until it has been set up');
-			await expect(notice.locator('li')).toHaveText(['Unit', '501st members group']);
+			await expect(notice.locator('li')).toHaveText([
+				'Unit',
+				'Reserve members group',
+				'501st members group',
+			]);
 			await notice.locator('a', { hasText: 'Settings' }).click();
 			await expect(page.locator('#access_audit_save_settings')).toBeVisible();
 			expect(memberRequests()).toEqual([]);

@@ -15,7 +15,7 @@ import {
 
 /**
  * Users & Groups -> Access Audit -> Settings: the unit, picked from the 501st API's list;
- * the Legion ID profile field; and the two groups the audit manages.
+ * the Legion ID profile field; and the three groups the audit manages.
  */
 const save = (page: import('@playwright/test').Page) =>
 	page.locator('#access_audit_save_settings').click();
@@ -53,6 +53,7 @@ test("offers the board's profile fields and groups", async ({ page }) => {
 		String(fixtures().profileFields.legion_id)
 	);
 	await expect(page.locator('#unit_group')).toHaveValue(String(fixtures().groups.unit));
+	await expect(page.locator('#reserve_group')).toHaveValue(String(fixtures().groups.reserve));
 	await expect(page.locator('#legion_group')).toHaveValue(String(fixtures().groups.legion));
 	await expect(page.locator('#unit_group option', { hasText: 'Command Staff' })).toHaveCount(1);
 });
@@ -63,6 +64,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 	await page.locator('#unit').selectOption(String(OTHER_UNIT.id));
 	await page.locator('#legion_id_field').selectOption(String(fixtures().profileFields.costumes));
 	await page.locator('#unit_group').selectOption(String(fixtures().groups.command));
+	await page.locator('#reserve_group').selectOption(String(fixtures().groups.legion));
 	await page.locator('#legion_group').selectOption(String(fixtures().groups.unit));
 	await save(page);
 
@@ -73,6 +75,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 		String(fixtures().profileFields.costumes)
 	);
 	expect(await getSetting('access_audit_unit_group')).toBe(String(fixtures().groups.command));
+	expect(await getSetting('access_audit_reserve_group')).toBe(String(fixtures().groups.legion));
 	expect(await getSetting('access_audit_legion_group')).toBe(String(fixtures().groups.unit));
 
 	const [entry] = await adminLog();
@@ -81,7 +84,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 	// The audit now goes by them.
 	await openAudit(page);
 	await expect(page.locator('#content')).toContainText(
-		'Active members of Midsouth Garrison belong in both Command Staff and Garrison Members.'
+		'Active members of Midsouth Garrison belong in both Command Staff and Garrison Members, and its Reserve members in both 501st Members and Garrison Members.'
 	);
 });
 
@@ -93,22 +96,35 @@ test("trims the API's stray spaces from a unit's name", async ({ page }) => {
 	expect(await getSetting('access_audit_unit_name')).toBe(OUTPOST.name);
 });
 
-test('will not save the same group for both', async ({ page }) => {
-	await gotoAuditSettings(page);
-	await page.locator('#legion_group').selectOption(String(fixtures().groups.unit));
-	await save(page);
+for (const [first, second] of [
+	['unit_group', 'legion_group'],
+	['unit_group', 'reserve_group'],
+	['reserve_group', 'legion_group'],
+]) {
+	test(`will not save the same group as ${first} and ${second}`, async ({ page }) => {
+		await gotoAuditSettings(page);
+		const chosen = await page.locator(`#${first}`).inputValue();
+		await page.locator(`#${second}`).selectOption(chosen);
+		await save(page);
 
-	await expect(page.locator('.error')).toContainText(
-		'The unit members group and the 501st members group must be different groups.'
-	);
-	expect(await getSetting('access_audit_legion_group')).toBe(String(fixtures().groups.legion));
-	// What was chosen is still chosen.
-	await expect(page.locator('#legion_group')).toHaveValue(String(fixtures().groups.unit));
-});
+		await expect(page.locator('.error')).toContainText(
+			'The unit members, reserve members and 501st members groups must be three different groups.'
+		);
+		expect(await getSetting(`access_audit_${second}`)).not.toBe(chosen);
+		// What was chosen is still chosen.
+		await expect(page.locator(`#${second}`)).toHaveValue(chosen);
+	});
+}
 
 test('will not save without every choice made', async ({ page }) => {
 	await gotoAuditSettings(page);
-	for (const select of ['#unit', '#legion_id_field', '#unit_group', '#legion_group']) {
+	for (const select of [
+		'#unit',
+		'#legion_id_field',
+		'#unit_group',
+		'#reserve_group',
+		'#legion_group',
+	]) {
 		await page.locator(select).selectOption('0');
 	}
 	await page.locator('#api_url').fill('not a url');
@@ -119,6 +135,7 @@ test('will not save without every choice made', async ({ page }) => {
 		"Choose this board's unit.",
 		"Choose the profile field that holds members' Legion IDs.",
 		'Choose the unit members group.',
+		'Choose the reserve members group.',
 		'Choose the 501st members group.',
 	]);
 	expect(await getSetting('access_audit_unit')).toBe(String(OUR_UNIT.id));

@@ -5,7 +5,8 @@ import { test, expect } from '../helpers/fixtures';
 import { gotoAudit, loginToAdminCp } from '../helpers/auth';
 import { REPO_ROOT } from '../helpers/config';
 import { runPhp } from '../helpers/container';
-import { execute, fixtures, getGroups, lookups, query, T } from '../helpers/db';
+import { execute, fixtures, getGroups, getSetting, lookups, query, T } from '../helpers/db';
+import { setSettings } from '../helpers/settings';
 import { RowDataPacket } from 'mysql2/promise';
 
 /**
@@ -18,6 +19,7 @@ const SETTINGS = [
 	'access_audit_legion_id_field',
 	'access_audit_unit_group',
 	'access_audit_legion_group',
+	'access_audit_reserve_group',
 ];
 
 const pluginRow = (page: Page) =>
@@ -114,6 +116,31 @@ test.describe('the schema', () => {
 		}
 		expect(await columnNames('access_audit_lookups')).not.toContain('profile_url');
 	});
+});
+
+test('adds a setting new since an earlier release by reactivating, and the audit asks for it', async ({
+	page,
+}) => {
+	// The board as a release from before the reserve members group left it.
+	await execute(`DELETE FROM ${T('settings')} WHERE name = 'access_audit_reserve_group'`);
+	await runPhp('rebuild_settings();');
+	try {
+		await clickPluginLink(page, 'Deactivate');
+		await clickPluginLink(page, 'Activate');
+
+		expect(await settingNames()).toEqual(SETTINGS);
+		expect(await getSetting('access_audit_reserve_group')).toBe('');
+		// The others are kept as they were.
+		expect(await getSetting('access_audit_unit_group')).toBe(String(fixtures().groups.unit));
+
+		await gotoAudit(page);
+		await expect(page.locator('#access_audit_not_configured li')).toHaveText([
+			'Reserve members group',
+		]);
+	} finally {
+		await reinstall();
+		await setSettings({ access_audit_reserve_group: String(fixtures().groups.reserve) });
+	}
 });
 
 test('is under Users & Groups', async ({ page }) => {

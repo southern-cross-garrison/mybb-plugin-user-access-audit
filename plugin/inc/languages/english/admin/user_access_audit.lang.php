@@ -6,7 +6,7 @@
 $l['access_audit'] = "Access Audit";
 
 $l['access_audit_tab_audit'] = "Audit";
-$l['access_audit_tab_audit_desc'] = "Every member's groups checked against their 501st Legion record. Only the unit members group and the 501st members group are ever changed; any other group a member is in is left alone.";
+$l['access_audit_tab_audit_desc'] = "Every member's groups checked against their 501st Legion record. Only the unit members, reserve members and 501st members groups are ever changed; any other group a member is in is left alone.";
 $l['access_audit_tab_settings'] = "Settings";
 $l['access_audit_tab_settings_desc'] = "Which unit this board belongs to, where members' Legion IDs are kept, and which groups the audit manages.";
 
@@ -15,14 +15,16 @@ $l['access_audit_choose'] = "Choose...";
 $l['access_audit_setting_api_url'] = "501st Legion API";
 $l['access_audit_setting_api_url_desc'] = "Where members' records and the list of units are fetched from. Normally https://api.501st.com.";
 $l['access_audit_setting_unit'] = "Unit";
-$l['access_audit_setting_unit_desc'] = "This board's garrison or outpost. Active members of it belong in both the unit members group and the 501st members group.";
+$l['access_audit_setting_unit_desc'] = "This board's garrison or outpost. Active members of it belong in the unit members group, Reserve members in the reserve members group, and both in the 501st members group.";
 $l['access_audit_setting_field'] = "Legion ID profile field";
 $l['access_audit_setting_field_desc'] = "The custom profile field members put their Legion ID in. \"TK-12345\", \"TK 12345\" and \"12345\" are all read as 12345.";
 $l['access_audit_setting_unit_group'] = "Unit members group";
 $l['access_audit_setting_unit_group_desc'] = "Active members of this unit belong in this group, and nobody else does.";
+$l['access_audit_setting_reserve_group'] = "Reserve members group";
+$l['access_audit_setting_reserve_group_desc'] = "Reserve members of this unit belong in this group, and nobody else does. Another unit's Reserve members belong in the 501st members group only.";
 $l['access_audit_setting_legion_group'] = "501st members group";
-$l['access_audit_setting_legion_group_desc'] = "Every active 501st member belongs in this group, this unit's own included, and nobody else does.";
-$l['access_audit_setting_same_group'] = "The unit members group and the 501st members group must be different groups";
+$l['access_audit_setting_legion_group_desc'] = "Every Active or Reserve 501st member belongs in this group, this unit's own included, and nobody else does.";
+$l['access_audit_setting_same_group'] = "The unit members, reserve members and 501st members groups must be three different groups";
 $l['access_audit_save_settings'] = "Save Settings";
 $l['access_audit_settings_saved'] = "The settings have been saved.";
 $l['access_audit_units_unavailable'] = "The list of units could not be fetched from the 501st Legion API. Check its address, or try again later.";
@@ -32,14 +34,15 @@ $l['access_audit_error_unit'] = "Choose this board's unit.";
 $l['access_audit_error_units_unavailable'] = "The list of units could not be fetched from the 501st Legion API, so the unit cannot be changed right now.";
 $l['access_audit_error_field'] = "Choose the profile field that holds members' Legion IDs.";
 $l['access_audit_error_unit_group'] = "Choose the unit members group.";
+$l['access_audit_error_reserve_group'] = "Choose the reserve members group.";
 $l['access_audit_error_legion_group'] = "Choose the 501st members group.";
-$l['access_audit_error_same_group'] = "The unit members group and the 501st members group must be different groups.";
+$l['access_audit_error_same_group'] = "The unit members, reserve members and 501st members groups must be three different groups.";
 
 // The audit.
 $l['access_audit_not_configured'] = "The audit cannot run until it has been set up on the <a href=\"{1}\">Settings</a> tab. Still needed:";
 $l['access_audit_not_configured_short'] = "The audit has not been set up yet.";
 $l['access_audit_summary'] = "Summary";
-$l['access_audit_summary_rules'] = "Active members of <strong>{1}</strong> belong in both <strong>{2}</strong> and <strong>{3}</strong>. Active members of any other unit belong in <strong>{3}</strong> only. Anybody else - no Legion ID, a Reserve or other inactive status, or no public 501st record - belongs in neither.";
+$l['access_audit_summary_rules'] = "Active members of <strong>{1}</strong> belong in both <strong>{2}</strong> and <strong>{3}</strong>, and its Reserve members in both <strong>{4}</strong> and <strong>{3}</strong>. Active and Reserve members of any other unit belong in <strong>{3}</strong> only. Anybody else - no Legion ID, any other status, or no public 501st record - belongs in none of them.";
 $l['access_audit_count_checked'] = "Members checked";
 $l['access_audit_count_ok'] = "Groups correct";
 $l['access_audit_count_fix'] = "Groups need changing";
@@ -62,7 +65,7 @@ $l['access_audit_col_change'] = "Needs";
 $l['access_audit_col_action'] = "Action";
 
 $l['access_audit_none'] = "None";
-$l['access_audit_neither'] = "Neither";
+$l['access_audit_in_none'] = "None of them";
 $l['access_audit_primary'] = "(primary)";
 $l['access_audit_record_no_legion_id'] = "No Legion ID on their profile";
 $l['access_audit_record_unchecked'] = "Could not reach the 501st Legion API";

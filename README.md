@@ -2,8 +2,8 @@
 
 Audits forum members' group access against the 501st Legion's API. Each member's Legion ID
 is looked up, and the Admin CP lists who should be in the 501st members group, who should
-be in the unit members group as well, and who should be in neither, with a Fix button for
-each. See
+be in the unit's active or reserve members group as well, and who should be in none of them,
+with a Fix button for each. See
 [PLUGIN.md](PLUGIN.md) for what the plugin does; this file covers the development
 environment and the test suite.
 

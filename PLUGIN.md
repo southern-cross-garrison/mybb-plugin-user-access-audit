@@ -1,16 +1,17 @@
 # MyBB Access Audit Plugin
 
-Checks every forum member's groups against their 501st Legion record. Every active 501st
-member belongs in a 501st members group, members of your unit belong in your unit's group
-as well, and everybody else belongs in neither. The audit lists who is in the wrong place and fixes them
-one at a time, after you have looked.
+Checks every forum member's groups against their 501st Legion record. Every Active or
+Reserve 501st member belongs in a 501st members group; your unit's own Active members belong
+in your unit members group as well, and its Reserve members in your reserve members group;
+everybody else belongs in none of them. The audit lists who is in the wrong place and fixes
+them one at a time, after you have looked.
 
 ## Features
 
 - **Every member checked.** Each member's Legion ID, from the profile field you choose, is
   looked up on the 501st Legion's API.
-- **Only two groups touched.** The audit manages your unit members group and your 501st
-  members group, and nothing else. Command staff, moderators, administrators and any other
+- **Only three groups touched.** The audit manages your unit members, reserve members and
+  501st members groups, and nothing else. Command staff, moderators, administrators and any other
   group a member is in are left exactly as they are.
 - **One member at a time.** Each row has its own Fix button. There is deliberately no way to
   fix everybody at once: every change gives somebody access or takes it away.
@@ -36,7 +37,7 @@ one at a time, after you have looked.
 2. In the Admin CP, go to Configuration -> Plugins and click **Install & Activate** beside
    Access Audit.
 3. Go to Users & Groups -> Access Audit -> Settings and choose your unit, the Legion ID
-   profile field and the two groups.
+   profile field and the three groups.
 
 ## Upgrading
 
@@ -52,13 +53,16 @@ the settings and the plugin's table too. Members' groups are never changed by ei
 
 Under Users & Groups -> Access Audit -> Settings:
 
-| Setting                 | What it does                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------ |
-| 501st Legion API        | Where records are fetched from. Starts as `https://api.501st.com`.                                     |
-| Unit                    | Your garrison or outpost, from the 501st's own list of units.                                          |
-| Legion ID profile field | The custom profile field that holds members' Legion IDs.                                               |
-| Unit members group      | Where active members of your unit belong.                                                              |
-| 501st members group     | Where every active 501st member belongs, your unit's own included. Must not be the unit members group. |
+| Setting                 | What it does                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| 501st Legion API        | Where records are fetched from. Starts as `https://api.501st.com`.            |
+| Unit                    | Your garrison or outpost, from the 501st's own list of units.                 |
+| Legion ID profile field | The custom profile field that holds members' Legion IDs.                      |
+| Unit members group      | Where Active members of your unit belong.                                     |
+| Reserve members group   | Where Reserve members of your unit belong.                                    |
+| 501st members group     | Where every Active or Reserve 501st member belongs, your unit's own included. |
+
+The three groups must all be different groups.
 
 They also appear under Configuration -> Settings -> Access Audit, but as plain boxes; use
 the plugin's own tab, which offers the lists.
@@ -67,13 +71,14 @@ the plugin's own tab, which offers the lists.
 
 A Legion ID is read as its digits, so "TK-12345", "TK 12345" and "12345" are all 12345.
 
-| The member                                           | Belongs in              |
-| ---------------------------------------------------- | ----------------------- |
-| Has no Legion ID (or none with a number in it)       | Neither group           |
-| Is not Active on the 501st's records - Reserve, say  | Neither group           |
-| Has no public record                                 | Neither group           |
-| Is Active in another unit (an outpost is a unit too) | The 501st members group |
-| Is Active in your unit                               | Both groups             |
+| The member                                                      | Belongs in                                   |
+| --------------------------------------------------------------- | -------------------------------------------- |
+| Has no Legion ID (or none with a number in it)                  | None of the groups                           |
+| Is neither Active nor Reserve on the 501st's records            | None of the groups                           |
+| Has no public record                                            | None of the groups                           |
+| Is Active or Reserve in another unit (an outpost is a unit too) | The 501st members group                      |
+| Is Active in your unit                                          | The unit members and 501st members groups    |
+| Is Reserve in your unit                                         | The reserve members and 501st members groups |
 
 "No public record" is what the API says both for a member who has made their record private
 and for an ID that does not exist, and in practice it is mostly members who have left or
@@ -104,8 +109,10 @@ is lifted, so anything changed now would be undone then.
 
 - Joining a group adds it to the member's additional groups.
 - Leaving a group takes it out of their additional groups. If it is their primary group,
-  which a member cannot be without, it is swapped for the group they now belong in, or for
-  Registered when they belong in neither.
+  which a member cannot be without, it is swapped for the group they now belong in - the
+  reserve members group for a member of your unit gone to the reserve, the unit members
+  group for one back from it, the 501st members group for one gone to another unit - or for
+  Registered when they belong in none.
 - If the group taken away was the one shown beside their name, MyBB goes back to showing
   their primary group.
 

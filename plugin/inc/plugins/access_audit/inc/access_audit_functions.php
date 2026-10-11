@@ -4,13 +4,15 @@
  *
  * Every member is judged by the Legion ID on their profile:
  *
- * - no Legion ID: in neither of the two groups;
- * - a 501st record that is not Active (Reserve, a classified record, anything else): in
- *   neither;
- * - Active, in another unit: in the 501st members group and not the unit's;
- * - Active, in this unit: in both - they are 501st members as much as anybody.
+ * - no Legion ID: in none of the three groups;
+ * - a 501st record that is neither Active nor Reserve (a classified record, anything
+ *   else): in none;
+ * - Active or Reserve, in another unit: in the 501st members group only;
+ * - Active, in this unit: in the unit members group and the 501st members group - they are
+ *   501st members as much as anybody;
+ * - Reserve, in this unit: in the reserve members group and the 501st members group.
  *
- * Only those two groups are ever changed. Every other group a member is in - command
+ * Only those three groups are ever changed. Every other group a member is in - command
  * staff, moderators, administrators - is left exactly as it is.
  */
 
@@ -29,14 +31,16 @@ define('ACCESS_AUDIT_DEFAULT_API_URL', 'https://api.501st.com');
 define('ACCESS_AUDIT_CLASSIFIED', 'Classified Record');
 
 /**
- * The only status that counts as active. Reserve members are in good standing but are not
- * active, and are treated like any other inactive member.
+ * The two statuses that make somebody a 501st member as far as the audit is concerned.
+ * Reserve members are in good standing but not active, so this unit's own have a group of
+ * their own rather than the unit members group.
  */
 define('ACCESS_AUDIT_ACTIVE', 'Active');
+define('ACCESS_AUDIT_RESERVE', 'Reserve');
 
 /**
  * The group a member is moved to when the group being taken away from them is their
- * primary group and they belong in neither: MyBB's Registered group.
+ * primary group and they belong in none: MyBB's Registered group.
  */
 define('ACCESS_AUDIT_REGISTERED_GROUP', 2);
 
@@ -48,6 +52,8 @@ define('ACCESS_AUDIT_UNCHECKED', 'unchecked');
 define('ACCESS_AUDIT_INACTIVE', 'inactive');
 define('ACCESS_AUDIT_OTHER_UNIT', 'other_unit');
 define('ACCESS_AUDIT_OUR_UNIT', 'our_unit');
+define('ACCESS_AUDIT_OTHER_UNIT_RESERVE', 'other_unit_reserve');
+define('ACCESS_AUDIT_OUR_UNIT_RESERVE', 'our_unit_reserve');
 define('ACCESS_AUDIT_BANNED', 'banned');
 
 /**
@@ -82,20 +88,21 @@ function access_audit_legion_number($legion_id)
 /**
  * The audit's configuration, and what is missing from it.
  *
- * @return array 'unit', 'unit_name', 'field', 'unit_group', 'legion_group' and 'missing'
- *               (language keys for each setting that is not usable)
+ * @return array 'unit', 'unit_name', 'field', 'unit_group', 'reserve_group', 'legion_group'
+ *               and 'missing' (language keys for each setting that is not usable)
  */
 function access_audit_config()
 {
     global $db, $cache;
 
     $config = array(
-        'unit'         => (int)access_audit_setting('unit'),
-        'unit_name'    => access_audit_setting('unit_name'),
-        'field'        => (int)access_audit_setting('legion_id_field'),
-        'unit_group'   => (int)access_audit_setting('unit_group'),
-        'legion_group' => (int)access_audit_setting('legion_group'),
-        'missing'      => array(),
+        'unit'          => (int)access_audit_setting('unit'),
+        'unit_name'     => access_audit_setting('unit_name'),
+        'field'         => (int)access_audit_setting('legion_id_field'),
+        'unit_group'    => (int)access_audit_setting('unit_group'),
+        'reserve_group' => (int)access_audit_setting('reserve_group'),
+        'legion_group'  => (int)access_audit_setting('legion_group'),
+        'missing'       => array(),
     );
 
     if(access_audit_api_base() === '')
@@ -115,7 +122,12 @@ function access_audit_config()
     }
 
     $groups = (array)$cache->read('usergroups');
-    foreach(array('unit_group' => 'access_audit_setting_unit_group', 'legion_group' => 'access_audit_setting_legion_group') as $key => $label)
+    $labels = array(
+        'unit_group'    => 'access_audit_setting_unit_group',
+        'reserve_group' => 'access_audit_setting_reserve_group',
+        'legion_group'  => 'access_audit_setting_legion_group',
+    );
+    foreach($labels as $key => $label)
     {
         if($config[$key] <= 0 || !isset($groups[$config[$key]]))
         {
@@ -123,12 +135,38 @@ function access_audit_config()
         }
     }
 
-    if($config['unit_group'] > 0 && $config['unit_group'] === $config['legion_group'])
+    if(!access_audit_groups_distinct(array($config['unit_group'], $config['reserve_group'], $config['legion_group'])))
     {
         $config['missing'][] = 'access_audit_setting_same_group';
     }
 
     return $config;
+}
+
+/**
+ * Whether none of the audited groups chosen so far is chosen twice. A group being two of
+ * them at once would have the audit both adding a member to it and taking them out.
+ *
+ * @param array $gids Of int; 0 for one not chosen yet, which does not count
+ * @return bool
+ */
+function access_audit_groups_distinct(array $gids)
+{
+    $chosen = array_filter(array_map('intval', $gids));
+
+    return count($chosen) === count(array_unique($chosen));
+}
+
+/**
+ * The groups the audit manages, in the order their changes are described: the unit's own
+ * two, then the 501st members group.
+ *
+ * @param array $config As access_audit_config()
+ * @return array Of int
+ */
+function access_audit_audited_groups(array $config)
+{
+    return array((int)$config['unit_group'], (int)$config['reserve_group'], (int)$config['legion_group']);
 }
 
 /**
@@ -227,19 +265,30 @@ function access_audit_evaluate(array $config, array $members)
             $verdict = ACCESS_AUDIT_UNCHECKED;
             $wanted = null;
         }
-        elseif($record['status'] !== ACCESS_AUDIT_ACTIVE)
+        elseif($record['status'] !== ACCESS_AUDIT_ACTIVE && $record['status'] !== ACCESS_AUDIT_RESERVE)
         {
             $verdict = ACCESS_AUDIT_INACTIVE;
             $wanted = array();
         }
         elseif((int)$record['garrison_id'] === (int)$config['unit'])
         {
-            $verdict = ACCESS_AUDIT_OUR_UNIT;
-            $wanted = array((int)$config['unit_group'], (int)$config['legion_group']);
+            // The unit's own group first, so that it is the one that takes over as primary
+            // when a member moves between active and reserve (see access_audit_plan()).
+            if($record['status'] === ACCESS_AUDIT_RESERVE)
+            {
+                $verdict = ACCESS_AUDIT_OUR_UNIT_RESERVE;
+                $wanted = array((int)$config['reserve_group'], (int)$config['legion_group']);
+            }
+            else
+            {
+                $verdict = ACCESS_AUDIT_OUR_UNIT;
+                $wanted = array((int)$config['unit_group'], (int)$config['legion_group']);
+            }
         }
         else
         {
-            $verdict = ACCESS_AUDIT_OTHER_UNIT;
+            // Another unit's reserve is no business of this unit's reserve group.
+            $verdict = $record['status'] === ACCESS_AUDIT_RESERVE ? ACCESS_AUDIT_OTHER_UNIT_RESERVE : ACCESS_AUDIT_OTHER_UNIT;
             $wanted = array((int)$config['legion_group']);
         }
 
@@ -339,13 +388,15 @@ function access_audit_is_banned(array $member, array $groups)
  *
  * Joining a group adds it to the member's additional groups. Leaving one takes it out of
  * them - or, when it is their primary group, which a member cannot be without, swaps it
- * for the group they belong in (moved from this unit to another: the 501st members group
- * becomes primary), or for Registered when they belong in neither. A display group that
- * is taken away goes back to showing the primary group.
+ * for the first of the groups they belong in (gone from active to reserve in this unit: the
+ * reserve members group; moved from this unit to another: the 501st members group), or for
+ * Registered when they belong in none. A display group that is taken away goes back to
+ * showing the primary group.
  *
  * @param array $member As access_audit_members()
- * @param array $wanted The audited groups the member belongs in: none, the 501st members
- *                      group, or both
+ * @param array $wanted The audited groups the member belongs in, the one to make primary
+ *                      if need be first: none, the 501st members group, or it and one of
+ *                      the unit's two
  * @param array $config As access_audit_config()
  * @return array 'usergroup', 'additionalgroups' (comma separated), 'displaygroup', 'add'
  *               and 'remove' (group ids), 'primary_from' and 'primary_to' (group ids, equal
@@ -353,7 +404,7 @@ function access_audit_is_banned(array $member, array $groups)
  */
 function access_audit_plan(array $member, array $wanted, array $config)
 {
-    $audited = array((int)$config['unit_group'], (int)$config['legion_group']);
+    $audited = access_audit_audited_groups($config);
     $wanted = array_values(array_intersect(array_map('intval', $wanted), $audited));
 
     $primary = (int)$member['usergroup'];

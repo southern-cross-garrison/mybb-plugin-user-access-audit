@@ -149,21 +149,23 @@ if($action == "settings")
     $errors = array();
 
     $values = array(
-        'api_url'      => access_audit_setting('api_url'),
-        'unit'         => (int)access_audit_setting('unit'),
-        'field'        => (int)access_audit_setting('legion_id_field'),
-        'unit_group'   => (int)access_audit_setting('unit_group'),
-        'legion_group' => (int)access_audit_setting('legion_group'),
+        'api_url'       => access_audit_setting('api_url'),
+        'unit'          => (int)access_audit_setting('unit'),
+        'field'         => (int)access_audit_setting('legion_id_field'),
+        'unit_group'    => (int)access_audit_setting('unit_group'),
+        'reserve_group' => (int)access_audit_setting('reserve_group'),
+        'legion_group'  => (int)access_audit_setting('legion_group'),
     );
 
     if($mybb->request_method == "post")
     {
         $values = array(
-            'api_url'      => trim($mybb->get_input('api_url')),
-            'unit'         => $mybb->get_input('unit', MyBB::INPUT_INT),
-            'field'        => $mybb->get_input('legion_id_field', MyBB::INPUT_INT),
-            'unit_group'   => $mybb->get_input('unit_group', MyBB::INPUT_INT),
-            'legion_group' => $mybb->get_input('legion_group', MyBB::INPUT_INT),
+            'api_url'       => trim($mybb->get_input('api_url')),
+            'unit'          => $mybb->get_input('unit', MyBB::INPUT_INT),
+            'field'         => $mybb->get_input('legion_id_field', MyBB::INPUT_INT),
+            'unit_group'    => $mybb->get_input('unit_group', MyBB::INPUT_INT),
+            'reserve_group' => $mybb->get_input('reserve_group', MyBB::INPUT_INT),
+            'legion_group'  => $mybb->get_input('legion_group', MyBB::INPUT_INT),
         );
     }
 
@@ -232,12 +234,17 @@ if($action == "settings")
             $errors[] = $lang->access_audit_error_unit_group;
         }
 
+        if(!isset($groups[$values['reserve_group']]))
+        {
+            $errors[] = $lang->access_audit_error_reserve_group;
+        }
+
         if(!isset($groups[$values['legion_group']]))
         {
             $errors[] = $lang->access_audit_error_legion_group;
         }
 
-        if($values['unit_group'] > 0 && $values['unit_group'] === $values['legion_group'])
+        if(!access_audit_groups_distinct(array($values['unit_group'], $values['reserve_group'], $values['legion_group'])))
         {
             $errors[] = $lang->access_audit_error_same_group;
         }
@@ -252,6 +259,7 @@ if($action == "settings")
                 'access_audit_unit_name'       => $unit_name,
                 'access_audit_legion_id_field' => (string)$values['field'],
                 'access_audit_unit_group'      => (string)$values['unit_group'],
+                'access_audit_reserve_group'   => (string)$values['reserve_group'],
                 'access_audit_legion_group'    => (string)$values['legion_group'],
             );
             foreach($settings as $name => $value)
@@ -338,6 +346,13 @@ if($action == "settings")
     );
 
     $container->output_row(
+        $lang->access_audit_setting_reserve_group . " <em>*</em>",
+        $lang->access_audit_setting_reserve_group_desc,
+        $form->generate_select_box('reserve_group', $group_options, $values['reserve_group'], array('id' => 'reserve_group')),
+        'reserve_group'
+    );
+
+    $container->output_row(
         $lang->access_audit_setting_legion_group . " <em>*</em>",
         $lang->access_audit_setting_legion_group_desc,
         $form->generate_select_box('legion_group', $group_options, $values['legion_group'], array('id' => 'legion_group')),
@@ -415,7 +430,8 @@ if(!$action)
     $summary->construct_cell($lang->sprintf($lang->access_audit_summary_rules,
         $unit_name,
         access_audit_group_name($config['unit_group']),
-        access_audit_group_name($config['legion_group'])), array('colspan' => 2));
+        access_audit_group_name($config['legion_group']),
+        access_audit_group_name($config['reserve_group'])), array('colspan' => 2));
     $summary->construct_row();
     foreach(array('checked', 'ok', 'fix', 'unchecked', 'banned', 'shared') as $key)
     {
@@ -542,7 +558,7 @@ if(!$action)
 
         $in = array();
         $additional = access_audit_group_list($member['additionalgroups']);
-        foreach(array($config['unit_group'], $config['legion_group']) as $gid)
+        foreach(access_audit_audited_groups($config) as $gid)
         {
             if((int)$member['usergroup'] === $gid)
             {
@@ -553,7 +569,7 @@ if(!$action)
                 $in[] = access_audit_group_name($gid);
             }
         }
-        $table->construct_cell($in ? implode('<br />', $in) : "<span class=\"access-audit-muted\">{$lang->access_audit_neither}</span>", array('class' => 'access-audit-groups'));
+        $table->construct_cell($in ? implode('<br />', $in) : "<span class=\"access-audit-muted\">{$lang->access_audit_in_none}</span>", array('class' => 'access-audit-groups'));
 
         if($result['plan'])
         {

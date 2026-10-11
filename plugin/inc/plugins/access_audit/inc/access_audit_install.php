@@ -226,10 +226,20 @@ function access_audit_install_settings()
         array(
             "name"        => "access_audit_legion_group",
             "title"       => "501st Members Group",
-            "description" => "Every active 501st member belongs in this group, this unit's own included.",
+            "description" => "Every active or reserve 501st member belongs in this group, this unit's own included.",
             "optionscode" => "groupselectsingle",
             "value"       => "",
             "disporder"   => 6,
+        ),
+        // Last, though it sits beside the unit members group on the plugin's own tab: a
+        // board that had the plugin before it already has 5 and 6 taken.
+        array(
+            "name"        => "access_audit_reserve_group",
+            "title"       => "Reserve Members Group",
+            "description" => "Reserve members of this unit belong in this group.",
+            "optionscode" => "groupselectsingle",
+            "value"       => "",
+            "disporder"   => 7,
         ),
     );
 

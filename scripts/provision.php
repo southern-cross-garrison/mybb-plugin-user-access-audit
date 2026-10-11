@@ -88,9 +88,10 @@ function provision_usergroup($title)
 }
 
 $groups = array(
-    // The two the audit manages.
+    // The three the audit manages.
     'unit' => provision_usergroup('Garrison Members'),
     'legion' => provision_usergroup('501st Members'),
+    'reserve' => provision_usergroup('Garrison Reserve'),
     // One it must never touch, the way a board's command staff group is.
     'command' => provision_usergroup('Command Staff'),
 );
@@ -240,6 +241,7 @@ $plugin_settings = array(
     'access_audit_unit_name' => 'Southern Cross Garrison',
     'access_audit_legion_id_field' => (string)$field_ids['legion_id'],
     'access_audit_unit_group' => (string)$groups['unit'],
+    'access_audit_reserve_group' => (string)$groups['reserve'],
     'access_audit_legion_group' => (string)$groups['legion'],
 );
 foreach ($plugin_settings as $name => $value) {
