@@ -2,7 +2,7 @@
 /**
  * MyBB Access Audit Plugin - Installation
  *
- * The schema, the schema upgrade runner and the settings.
+ * The schema, the schema upgrade runner, the settings and the scheduled task.
  */
 
 if(!defined("IN_MYBB"))
@@ -10,7 +10,7 @@ if(!defined("IN_MYBB"))
     die("Direct initialization of this file is not allowed.");
 }
 
-require_once MYBB_ROOT . "inc/plugins/access_audit/inc/access_audit_functions.php";
+require_once MYBB_ROOT . "inc/plugins/access_audit/inc/access_audit_lookup.php";
 
 /**
  * Every table the plugin owns, unprefixed. Uninstall walks this list, so a table added
@@ -21,6 +21,7 @@ function access_audit_plugin_tables()
     return array(
         'access_audit_lookups',
         'access_audit_email_lookups',
+        'access_audit_found_legion_ids',
         'access_audit_schema_upgrades'
     );
 }
@@ -287,11 +288,69 @@ function access_audit_install_settings()
 }
 
 /**
- * Drop the plugin's tables and settings.
+ * Create the scheduled task that looks members up by email address, or turn it back on.
+ *
+ * Every five minutes (see inc/tasks/access_audit.php). It does nothing until the audit has
+ * been set up.
+ */
+function access_audit_enable_task()
+{
+    global $db, $cache;
+
+    require_once MYBB_ROOT . "inc/functions_task.php";
+
+    $tid = (int)$db->fetch_field($db->simple_select("tasks", "tid", "file = '" . ACCESS_AUDIT_TASK_FILE . "'"), "tid");
+    if($tid)
+    {
+        $db->update_query("tasks", array('enabled' => 1, 'locked' => 0), "tid = {$tid}");
+    }
+    else
+    {
+        $task = array(
+            'title'       => $db->escape_string("Access Audit: Legion IDs by email address"),
+            'description' => $db->escape_string("Looks up members with no Legion ID on their profile by their email address, as many at a time as the 501st Legion API allows, and saves the Legion IDs found."),
+            'file'        => ACCESS_AUDIT_TASK_FILE,
+            'minute'      => '0,5,10,15,20,25,30,35,40,45,50,55',
+            'hour'        => '*',
+            'day'         => '*',
+            'month'       => '*',
+            'weekday'     => '*',
+            'enabled'     => 1,
+            'logging'     => 1,
+            'locked'      => 0,
+        );
+        $task['nextrun'] = fetch_next_run($task);
+        $db->insert_query("tasks", $task);
+    }
+
+    $cache->update_tasks();
+}
+
+/**
+ * Turn the scheduled task off, keeping it and its log.
+ */
+function access_audit_disable_task()
+{
+    global $db, $cache;
+
+    $db->update_query("tasks", array('enabled' => 0), "file = '" . ACCESS_AUDIT_TASK_FILE . "'");
+    $cache->update_tasks();
+}
+
+/**
+ * Drop the plugin's tables, settings and scheduled task.
  */
 function access_audit_uninstall_database()
 {
-    global $db;
+    global $db, $cache;
+
+    $query = $db->simple_select("tasks", "tid", "file = '" . ACCESS_AUDIT_TASK_FILE . "'");
+    while($task = $db->fetch_array($query))
+    {
+        $db->delete_query("tasklog", "tid = " . (int)$task['tid']);
+    }
+    $db->delete_query("tasks", "file = '" . ACCESS_AUDIT_TASK_FILE . "'");
+    $cache->update_tasks();
 
     foreach(access_audit_plugin_tables() as $table)
     {

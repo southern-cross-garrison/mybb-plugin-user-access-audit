@@ -7,7 +7,9 @@
  * /email/{email}, the Legion ID of the member with that email address. The record is what
  * the audit judges a member by: memberStatus, garrisonId for which unit they belong to, and
  * squadId for which squad, if any. The list of squads does not say which unit each is in,
- * so that comes from their officers' records (see access_audit_api_squads()).
+ * so that comes from their officers' records (see access_audit_api_squads()). Email
+ * addresses are only ever looked up in the background, a batch at a time, for the API's
+ * limit on those (see ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT).
  *
  * The API answers a member who has made their record private and an ID nobody holds the
  * same way: 200, with nothing but {"memberStatus": "Classified Record"}. Members who have
@@ -36,11 +38,29 @@ define('ACCESS_AUDIT_API_TIMEOUT', 15);
 define('ACCESS_AUDIT_API_CONCURRENCY', 8);
 
 /**
- * How long an answer from the API is reused for, in seconds. Long enough that fixing the
- * members on the page one by one does not ask about everybody again after each; short
+ * How long a member record from the API is reused for, in seconds. Long enough that fixing
+ * the members on the page one by one does not ask about everybody again after each; short
  * enough that an audit opened later is the 501st's word as it is now.
  */
 define('ACCESS_AUDIT_LOOKUP_TTL', 900);
+
+/**
+ * The API allows each address 60 email lookups in any 15 minutes (its
+ * EMAIL_LOOKUP_RATE_LIMIT_PER_IP) and answers the rest with 429 Too Many Requests; member
+ * records have no such limit. So members are looked up by email address in batches in the
+ * background (see access_audit_lookup.php), which keep under it by the plugin's own count -
+ * a little short of it: a lookup the API did not answer counts there and not here, and the
+ * board may not be the only thing asking from its address.
+ */
+define('ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT', 50);
+define('ACCESS_AUDIT_EMAIL_LOOKUP_WINDOW', 900);
+
+/**
+ * How long until an address no approved member has is asked about again: for a member who
+ * has joined the 501st since, or given it the address they use here. An address that is
+ * somebody's has its Legion ID saved, and is not asked about again at all.
+ */
+define('ACCESS_AUDIT_EMAIL_RECHECK', 604800);
 
 /**
  * The API's base address, with no trailing slash, or '' when it is not set.
@@ -346,11 +366,14 @@ function access_audit_api_parse_member(array $data)
  *
  * @param array $paths key => path from the base, starting with a slash
  * @param string|null $base As access_audit_api_base()
+ * @param bool $limited Set to whether the API turned a request away for asking too often,
+ *                      after which nothing more is asked
  * @return array key => decoded response (as access_audit_api_decode()), for the paths the
  *               API answered; a path it did not answer is missing
  */
-function access_audit_api_fetch_many(array $paths, $base = null)
+function access_audit_api_fetch_many(array $paths, $base = null, &$limited = null)
 {
+    $limited = false;
     $base = access_audit_api_base($base);
     if($base === '' || !access_audit_valid_api_url($base) || !function_exists('curl_multi_init') || !$paths)
     {
@@ -393,8 +416,16 @@ function access_audit_api_fetch_many(array $paths, $base = null)
 
             if($key !== false)
             {
+                $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                if($done['result'] === CURLE_OK && $code === 429)
+                {
+                    // Anything more asked now would only be turned away too.
+                    $limited = true;
+                    $pending = array();
+                }
+
                 $data = $done['result'] === CURLE_OK
-                    ? access_audit_api_decode(curl_multi_getcontent($ch), (int)curl_getinfo($ch, CURLINFO_HTTP_CODE))
+                    ? access_audit_api_decode(curl_multi_getcontent($ch), $code)
                     : null;
 
                 if($data !== null)
@@ -479,10 +510,11 @@ function access_audit_api_parse_email(array $data)
  * Look email addresses up on the API, several at a time.
  *
  * @param array $emails Of string, as access_audit_normalise_email()
+ * @param bool $limited As access_audit_api_fetch_many()
  * @return array email => Legion ID (0 for no match), for the addresses the API answered;
  *               one it did not answer is missing
  */
-function access_audit_api_fetch_emails(array $emails)
+function access_audit_api_fetch_emails(array $emails, &$limited = null)
 {
     $paths = array();
     foreach(array_unique($emails) as $email)
@@ -491,7 +523,7 @@ function access_audit_api_fetch_emails(array $emails)
     }
 
     $found = array();
-    foreach(access_audit_api_fetch_many($paths) as $email => $data)
+    foreach(access_audit_api_fetch_many($paths, null, $limited) as $email => $data)
     {
         $legion_id = access_audit_api_parse_email($data);
         if($legion_id !== null)
@@ -592,16 +624,16 @@ function access_audit_normalise_email($email)
 }
 
 /**
- * The Legion IDs of the members with these email addresses: from the email lookups table
- * when they were asked about recently, otherwise from the API, keeping what it answers.
+ * What the email lookups table holds for these addresses, however old.
  *
  * The table holds a hash of each address rather than the address, so the plugin keeps no
  * copy of members' addresses of its own.
  *
  * @param array $emails Of string, as access_audit_normalise_email()
- * @return array email => Legion ID (0 for no match); an address neither had is missing
+ * @return array email => array('legion_id' => int (0 for no match), 'fetched_at' => int);
+ *               an address never asked about is missing
  */
-function access_audit_lookup_emails(array $emails)
+function access_audit_kept_emails(array $emails)
 {
     global $db;
 
@@ -610,36 +642,66 @@ function access_audit_lookup_emails(array $emails)
     {
         $hashes[sha1($email)] = $email;
     }
-    if(!$hashes)
+
+    $kept = array();
+    foreach(array_chunk(array_keys($hashes), 500) as $chunk)
+    {
+        $query = $db->simple_select("access_audit_email_lookups", "email_hash, legion_id, fetched_at",
+            "email_hash IN ('" . implode("','", $chunk) . "')");
+        while($row = $db->fetch_array($query))
+        {
+            $kept[$hashes[$row['email_hash']]] = array(
+                'legion_id'  => (int)$row['legion_id'],
+                'fetched_at' => (int)$row['fetched_at'],
+            );
+        }
+    }
+
+    return $kept;
+}
+
+/**
+ * How many email lookups the API's limit leaves room for now (see
+ * ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT). Every answer kept was a lookup, so the answers kept in
+ * the last window are the lookups spent in it.
+ *
+ * @return int
+ */
+function access_audit_email_allowance()
+{
+    global $db;
+
+    $spent = (int)$db->fetch_field($db->simple_select("access_audit_email_lookups", "COUNT(*) AS spent",
+        "fetched_at > " . (int)(TIME_NOW - ACCESS_AUDIT_EMAIL_LOOKUP_WINDOW)), "spent");
+
+    return max(0, ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT - $spent);
+}
+
+/**
+ * Ask the API for the Legion IDs of the members with these email addresses, and keep what
+ * it answers. Nothing is checked against the allowance here: the caller asks for no more
+ * than access_audit_email_allowance().
+ *
+ * @param array $emails Of string, as access_audit_normalise_email()
+ * @param bool $limited As access_audit_api_fetch_many()
+ * @return array email => Legion ID (0 for no match), for the addresses the API answered
+ */
+function access_audit_lookup_emails(array $emails, &$limited = null)
+{
+    global $db;
+
+    $limited = false;
+    $emails = array_values(array_filter(array_unique($emails), 'strlen'));
+    if(!$emails)
     {
         return array();
     }
 
-    $found = array();
-    $fresh_since = TIME_NOW - ACCESS_AUDIT_LOOKUP_TTL;
-
-    foreach(array_chunk(array_keys($hashes), 500) as $chunk)
-    {
-        $query = $db->simple_select("access_audit_email_lookups", "email_hash, legion_id",
-            "email_hash IN ('" . implode("','", $chunk) . "') AND fetched_at >= " . (int)$fresh_since);
-        while($row = $db->fetch_array($query))
-        {
-            $found[$hashes[$row['email_hash']]] = (int)$row['legion_id'];
-        }
-    }
-
-    $missing = array_values(array_diff($hashes, array_keys($found)));
-    if(!$missing)
-    {
-        return $found;
-    }
-
     @set_time_limit(0);
 
-    foreach(access_audit_api_fetch_emails($missing) as $email => $legion_id)
+    $answers = access_audit_api_fetch_emails($emails, $limited);
+    foreach($answers as $email => $legion_id)
     {
-        $found[$email] = $legion_id;
-
         $db->replace_query("access_audit_email_lookups", array(
             'email_hash' => $db->escape_string(sha1($email)),
             'legion_id'  => (int)$legion_id,
@@ -647,22 +709,29 @@ function access_audit_lookup_emails(array $emails)
         ));
     }
 
-    return $found;
+    return $answers;
 }
 
 /**
- * Forget every kept answer, so the next audit asks the API about everybody.
+ * Forget kept answers, so they are asked for again.
+ *
+ * @param bool $emails Whether email lookups' answers go too. Check Again keeps them: they
+ *                     are rationed (see ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT), and asking about
+ *                     every address again takes hours.
  */
-function access_audit_forget_lookups()
+function access_audit_forget_lookups($emails = true)
 {
     global $db;
 
     $db->delete_query("access_audit_lookups");
-    $db->delete_query("access_audit_email_lookups");
+    if($emails)
+    {
+        $db->delete_query("access_audit_email_lookups");
+    }
 }
 
 /**
- * When the oldest answer the audit is going on was fetched.
+ * When the oldest member record the audit is going on was fetched.
  *
  * @return int|null Unix time; null when nothing is kept
  */
@@ -670,16 +739,8 @@ function access_audit_oldest_lookup()
 {
     global $db;
 
-    $times = array();
-    foreach(array("access_audit_lookups", "access_audit_email_lookups") as $table)
-    {
-        $oldest = $db->fetch_field($db->simple_select($table, "MIN(fetched_at) AS oldest",
-            "fetched_at >= " . (int)(TIME_NOW - ACCESS_AUDIT_LOOKUP_TTL)), "oldest");
-        if($oldest)
-        {
-            $times[] = (int)$oldest;
-        }
-    }
+    $oldest = $db->fetch_field($db->simple_select("access_audit_lookups", "MIN(fetched_at) AS oldest",
+        "fetched_at >= " . (int)(TIME_NOW - ACCESS_AUDIT_LOOKUP_TTL)), "oldest");
 
-    return $times ? min($times) : null;
+    return $oldest ? (int)$oldest : null;
 }

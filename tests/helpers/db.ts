@@ -121,9 +121,29 @@ export async function snapshotBoardState(): Promise<void> {
 	);
 }
 
+/** Every member's email address, as looked up an hour ago and matching nobody. */
+async function lookedUpByEmail(conn: Connection): Promise<void> {
+	await conn.query(
+		`INSERT IGNORE INTO ${T('access_audit_email_lookups')} (email_hash, legion_id, fetched_at)
+       SELECT SHA1(LOWER(TRIM(email))), 0, UNIX_TIMESTAMP() - 3600 FROM ${T('users')} WHERE email <> ''`
+	);
+}
+
+/** Forget every email address lookup, so that every member is yet to be looked up. */
+export async function forgetEmailLookups(): Promise<void> {
+	await execute(`DELETE FROM ${T('access_audit_email_lookups')}`);
+}
+
+/** Move every email address lookup this many seconds into the past. */
+export async function ageEmailLookups(seconds: number): Promise<void> {
+	await execute(
+		`UPDATE ${T('access_audit_email_lookups')} SET fetched_at = fetched_at - ${Math.trunc(seconds)}`
+	);
+}
+
 /**
  * Put every member's groups and Legion ID back as provisioned, forget every answer the
- * plugin kept from the API, and empty the administrator log.
+ * plugin kept from the API and every Legion ID it saved, and empty the administrator log.
  *
  * The settings are only put back when a test changed them, since that needs MyBB to
  * rebuild its settings file - the slowest part of a reset.
@@ -144,11 +164,24 @@ export async function resetBoardState(): Promise<void> {
 	);
 
 	// Absent only while plugin-setup has the plugin uninstalled.
-	for (const table of ['access_audit_lookups', 'access_audit_email_lookups']) {
+	for (const table of [
+		'access_audit_lookups',
+		'access_audit_email_lookups',
+		'access_audit_found_legion_ids',
+	]) {
 		const [tables] = await conn.query(`SHOW TABLES LIKE '${T(table)}'`);
 		if ((tables as unknown[]).length > 0) {
 			await conn.query(`DELETE FROM ${T(table)}`);
 		}
+	}
+
+	// Every member's email address looked up an hour ago, matching nobody - as the stand-in
+	// answers by default - so a member with no Legion ID is judged as having none rather
+	// than waiting to be looked up. An hour ago is outside the API's 15 minutes, so none of
+	// it counts against the plugin's allowance of lookups. Hashed as the plugin does it.
+	const [emailTable] = await conn.query(`SHOW TABLES LIKE '${T('access_audit_email_lookups')}'`);
+	if ((emailTable as unknown[]).length > 0) {
+		await lookedUpByEmail(conn);
 	}
 
 	await conn.query(`TRUNCATE TABLE ${T('adminlog')}`);

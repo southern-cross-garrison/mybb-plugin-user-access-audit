@@ -16,9 +16,10 @@
  * On top of that, an Active member of one of the squads chosen in the settings is in that
  * squad's group, and nobody else is.
  *
- * A member with no Legion ID on their profile is looked up by their email address first.
- * A Legion ID found that way is the one they are judged by, and fixing them saves it to
- * their profile.
+ * A member with no Legion ID on their profile is looked up by their email address in the
+ * background, and a Legion ID found that way is saved to their profile (see
+ * access_audit_lookup.php). Until they have been looked up, nothing is said about them:
+ * only an answer that no approved member has their address says they have no Legion ID.
  *
  * Only those groups are ever changed. Every other group a member is in - command staff,
  * moderators, administrators - is left exactly as it is.
@@ -393,12 +394,12 @@ function access_audit_group_list($additionalgroups)
  * @param array $config As access_audit_config(), with nothing missing
  * @param array $members As access_audit_members()
  * @return array One entry per member, in access_audit_compare_results() order: 'member',
- *               'legion_number' (the Legion ID they are judged by, 0 for none),
- *               'found_legion_id' (that number when it was found by their email address
- *               rather than on their profile, otherwise 0), 'record' (the 501st's, or
- *               null), 'verdict', 'plan' (as access_audit_plan(), or null when nothing
- *               should change or nothing can be said), and 'shared_with' (the other members
- *               among $members on the same Legion ID, each 'uid' and 'username')
+ *               'legion_number' (the Legion ID they are judged by, 0 for none), 'record'
+ *               (the 501st's, or null), 'verdict', 'plan' (as access_audit_plan(), or null
+ *               when nothing should change or nothing can be said), 'shared_with' (the
+ *               other members among $members on the same Legion ID, each 'uid' and
+ *               'username'), and 'waiting' (whether they could not be checked because they
+ *               have no Legion ID and are waiting to be looked up by email address)
  */
 function access_audit_evaluate(array $config, array $members)
 {
@@ -406,8 +407,8 @@ function access_audit_evaluate(array $config, array $members)
 
     $groups = (array)$cache->read('usergroups');
 
-    // A member with no Legion ID of their own is asked about by email address, and the
-    // Legion ID found, if any, looked up along with everybody else's.
+    // What the background lookups have said about the email addresses of members with no
+    // Legion ID of their own. The audit never asks the API about those itself.
     $numbers = array();
     $emails = array();
     foreach($members as $member)
@@ -428,14 +429,7 @@ function access_audit_evaluate(array $config, array $members)
         }
     }
 
-    $found = access_audit_lookup_emails($emails);
-    foreach($found as $legion_id)
-    {
-        if($legion_id > 0)
-        {
-            $numbers[] = $legion_id;
-        }
-    }
+    $kept_emails = access_audit_kept_emails($emails);
 
     $records = access_audit_lookup_members($numbers);
 
@@ -443,21 +437,14 @@ function access_audit_evaluate(array $config, array $members)
     foreach($members as $member)
     {
         $number = access_audit_legion_number($member['legion_id']);
-        $found_legion_id = 0;
-        // Whether the email address was asked about and the API gave no answer, which says
-        // nothing about whether they have a Legion ID.
-        $email_unanswered = false;
+        // Whether they have no Legion ID of their own and the lookups have yet to say that no
+        // approved member has their email address. Found to be somebody's, it is still
+        // waiting to be saved to their profile - the lookups save it, not the audit.
+        $email_waiting = false;
         if($number === 0 && !access_audit_is_banned($member, $groups))
         {
             $email = access_audit_normalise_email($member['email']);
-            if($email !== '' && !isset($found[$email]))
-            {
-                $email_unanswered = true;
-            }
-            elseif($email !== '' && $found[$email] > 0)
-            {
-                $number = $found_legion_id = $found[$email];
-            }
+            $email_waiting = $email !== '' && (!isset($kept_emails[$email]) || $kept_emails[$email]['legion_id'] > 0);
         }
         $record = $number > 0 && isset($records[$number]) ? $records[$number] : null;
 
@@ -469,7 +456,7 @@ function access_audit_evaluate(array $config, array $members)
             $verdict = ACCESS_AUDIT_BANNED;
             $wanted = null;
         }
-        elseif($email_unanswered)
+        elseif($email_waiting)
         {
             $verdict = ACCESS_AUDIT_UNCHECKED;
             $wanted = null;
@@ -530,16 +517,16 @@ function access_audit_evaluate(array $config, array $members)
             }
         }
 
-        $plan = $wanted === null ? null : access_audit_plan($member, $wanted, $config, $found_legion_id);
+        $plan = $wanted === null ? null : access_audit_plan($member, $wanted, $config);
 
         $results[] = array(
             'member'          => $member,
             'legion_number'   => $number,
-            'found_legion_id' => $found_legion_id,
             'record'          => $record,
             'verdict'         => $verdict,
             'plan'            => $plan && $plan['changed'] ? $plan : null,
             'shared_with'     => array(),
+            'waiting'         => $email_waiting,
         );
     }
 
@@ -547,7 +534,6 @@ function access_audit_evaluate(array $config, array $members)
     // another member's ID to get their access - which the 501st's record cannot tell apart,
     // since it answers for the ID and not the account. Each is noted with the others, and
     // banned accounts count: an ID shared with a banned account is how a ban gets dodged.
-    // A Legion ID found by email counts as much as one typed in.
     $holders = array();
     foreach($results as $index => $result)
     {
@@ -640,13 +626,11 @@ function access_audit_is_banned(array $member, array $groups)
  *                      members group, or it and the unit members or reserve members group -
  *                      and a squad's group after those
  * @param array $config As access_audit_config()
- * @param int $legion_id A Legion ID found by email to save to their profile; 0 for none
  * @return array 'usergroup', 'additionalgroups' (comma separated), 'displaygroup', 'add'
  *               and 'remove' (group ids), 'primary_from' and 'primary_to' (group ids, equal
- *               when the primary group stays), 'legion_id', 'groups_changed', and 'changed'
- *               (the groups, or a Legion ID to save)
+ *               when the primary group stays), and 'changed'
  */
-function access_audit_plan(array $member, array $wanted, array $config, $legion_id = 0)
+function access_audit_plan(array $member, array $wanted, array $config)
 {
     $audited = access_audit_audited_groups($config);
     $wanted = array_values(array_intersect(array_map('intval', $wanted), $audited));
@@ -690,7 +674,7 @@ function access_audit_plan(array $member, array $wanted, array $config, $legion_
     $sorted_additional = $new_additional;
     sort($sorted_additional);
 
-    $groups_changed = $new_primary !== $primary || $sorted_additional !== $old_additional || $new_display !== $display;
+    $changed = $new_primary !== $primary || $sorted_additional !== $old_additional || $new_display !== $display;
 
     return array(
         'usergroup'        => $new_primary,
@@ -700,17 +684,15 @@ function access_audit_plan(array $member, array $wanted, array $config, $legion_
         'remove'           => $remove,
         'primary_from'     => $primary,
         'primary_to'       => $new_primary,
-        'legion_id'        => (int)$legion_id,
-        'groups_changed'   => $groups_changed,
-        'changed'          => $groups_changed || (int)$legion_id > 0,
+        'changed'          => $changed,
     );
 }
 
 /**
  * Save a Legion ID found by email to a member's profile.
  *
- * Guarded on the field as it was when the Legion ID was found, so one the member or
- * another administrator has put there in the meantime is never overwritten.
+ * Guarded on the field as it was when the member was read, so one the member or an
+ * administrator has put there in the meantime is never overwritten.
  *
  * @param array $member As access_audit_members()
  * @param int $legion_id
@@ -785,8 +767,7 @@ function access_audit_apply(array $member, array $plan)
 }
 
 /**
- * A plan, in words: "Set Legion ID to 12345; Add to Garrison Members; Remove from 501st
- * Members".
+ * A plan, in words: "Add to Garrison Members; Remove from 501st Members".
  *
  * @param array $plan As access_audit_plan()
  * @param bool $html Whether to escape the group names for a page
@@ -797,10 +778,6 @@ function access_audit_describe_plan(array $plan, $html = true)
     global $lang;
 
     $parts = array();
-    if($plan['legion_id'] > 0)
-    {
-        $parts[] = $lang->sprintf($lang->access_audit_change_legion_id, (int)$plan['legion_id']);
-    }
     foreach($plan['add'] as $gid)
     {
         $parts[] = $lang->sprintf($lang->access_audit_change_add, access_audit_group_name($gid, $html));

@@ -10,8 +10,8 @@ import {
 	adminLog,
 	execute,
 	fixtures,
+	forgetEmailLookups,
 	getGroups,
-	getLegionId,
 	query,
 	setGroups,
 	setLegionId,
@@ -23,12 +23,9 @@ import {
 	OUTPOST,
 	SQUAD,
 	UNAUDITED_SQUAD,
-	emailMatch,
 	emailRequests,
-	emailsDown,
 	legionApiMember,
 	memberRequests,
-	stubEmail,
 	stubFixtureMembers,
 	stubLegionApi,
 	unstubLegionApi,
@@ -68,13 +65,15 @@ test.describe('the audit', () => {
 			unchecked: 0,
 			banned: 1,
 			shared: 0,
-			found: 0,
 		});
 		await expect(page.locator('#access_audit_empty')).toHaveText(
 			"Every member's groups are correct."
 		);
 		await expect(page.locator('button.access-audit-fix')).toHaveCount(0);
-		// Only the members with a Legion ID are looked up, and the banned one is not.
+		await expect(page.locator('#access_audit_count_waiting')).toHaveCount(0);
+		// Only the members with a Legion ID are looked up, and the banned one is not. Email
+		// addresses never are: that is the background lookups' job.
+		expect(emailRequests()).toEqual([]);
 		expect(memberRequests().sort()).toEqual(
 			[
 				'/legionId/10001',
@@ -681,188 +680,58 @@ test.describe('the Legion ID', () => {
 	});
 });
 
-test.describe('a Legion ID found by email address', () => {
-	const GUEST_EMAIL = 'guestmember@example.test';
-
-	test('is used for a member with none on their profile, and saved by Fix with their groups', async ({
-		page,
-	}) => {
-		stubEmail(GUEST_EMAIL, emailMatch(20003));
-		stubLegionApi(20003, legionApiMember(20003, { fullName: 'Guest Member' }));
+test.describe('a member with no Legion ID on their profile', () => {
+	test('is not checked until they have been looked up by email address', async ({ page }) => {
+		await forgetEmailLookups();
+		await setGroups('guestmember', { additionalgroups: [groups().unit] });
 		await openAudit(page);
 
 		const guest = row(page, 'guestmember');
-		await expect(guest).toHaveClass(/access-audit-found-id/);
-		await expect(guest.locator('.access-audit-legion-id')).toContainText('None');
-		const found = guest.locator('.access-audit-found');
-		await expect(found).toHaveText('Found by email address: 20003');
-		await expect(found.locator('a')).toHaveAttribute('href', 'https://501st.com/member/20003');
-		await expect(guest.locator('.access-audit-record')).toContainText(
-			'Active - Southern Cross Garrison'
+		await expect(guest.locator('.access-audit-record')).toHaveText(
+			'No Legion ID on their profile, and not looked up by email address yet'
 		);
-		await expect(guest.locator('.access-audit-change')).toHaveText(
-			'Set Legion ID to 20003; Add to Garrison Members; Add to 501st Members'
+		await expect(guest.locator('.access-audit-change')).toHaveText('Unknown until the API answers');
+		await expect(fixButton(page, 'guestmember')).toHaveCount(0);
+		// guestmember, admin and staffadmin; the banned member is never looked up.
+		expect(Number(await page.locator('#access_audit_count_waiting').innerText())).toBe(3);
+		expect((await counts(page)).unchecked).toBe(3);
+		await expect(page.locator('#access_audit_rules a', { hasText: 'Legion IDs' })).toHaveAttribute(
+			'href',
+			/action=legion_ids/
 		);
-		expect((await counts(page)).found).toBe(1);
-		expect(emailRequests()).toContain(`/email/${GUEST_EMAIL}`);
+		expect(emailRequests()).toEqual([]);
 
-		await fix(page, 'guestmember');
-
-		expect(await getLegionId('guestmember')).toBe('20003');
-		expect((await getGroups('guestmember')).additionalgroups).toEqual(
-			[groups().unit, groups().legion].sort((a, b) => a - b)
+		const key = await page.locator('input[name="my_post_key"]').getAttribute('value');
+		const response = await page.request.post(
+			'/admin/index.php?module=user-access_audit&action=fix',
+			{ form: { my_post_key: key!, uid: String(uid('guestmember')) } }
 		);
-		await expect(flash(page)).toHaveText(
-			'guestmember has been fixed: Set Legion ID to 20003; Add to Garrison Members; Add to 501st Members.'
+		expect(await response.text()).toContain(
+			'guestmember could not be checked: they have no Legion ID on their profile and have not been looked up by email address yet.'
 		);
-		// Their own Legion ID from now on, and their groups right for it.
-		await expect(row(page, 'guestmember')).toHaveCount(0);
-		const [entry] = await adminLog();
-		expect(entry.data).toContain('Set Legion ID to 20003');
+		expect((await getGroups('guestmember')).additionalgroups).toEqual([groups().unit]);
 	});
 
-	test('is offered even when it leaves their groups as they are', async ({ page }) => {
-		stubEmail(GUEST_EMAIL, emailMatch(20003));
-		stubLegionApi(20003, CLASSIFIED);
+	test('is not checked while a Legion ID found for them is yet to be saved', async ({ page }) => {
+		await execute(
+			`UPDATE ${T('access_audit_email_lookups')} SET legion_id = 20003 WHERE email_hash = SHA1('guestmember@example.test')`
+		);
+		await setGroups('guestmember', { additionalgroups: [groups().unit] });
 		await openAudit(page);
 
-		await expect(row(page, 'guestmember').locator('.access-audit-change')).toHaveText(
-			'Set Legion ID to 20003'
-		);
-		await fix(page, 'guestmember');
-
-		expect(await getLegionId('guestmember')).toBe('20003');
-		expect(await getGroups('guestmember')).toEqual({
-			usergroup: REGISTERED,
-			additionalgroups: [],
-			displaygroup: 0,
-		});
-	});
-
-	test('replaces a Legion ID with no number in it', async ({ page }) => {
-		await setLegionId('trooper2', 'pending');
-		stubEmail('trooper2@example.test', emailMatch(20002));
-		await openAudit(page);
-
-		const trooper = row(page, 'trooper2');
-		await expect(trooper.locator('.access-audit-legion-id')).toContainText('pending');
-		await expect(trooper.locator('.access-audit-found')).toHaveText(
-			'Found by email address: 20002'
-		);
-		await fix(page, 'trooper2');
-
-		expect(await getLegionId('trooper2')).toBe('20002');
-	});
-
-	test('is saved for a member with no profile fields row at all', async ({ page }) => {
-		await execute(`DELETE FROM ${T('userfields')} WHERE ufid = ?`, [uid('guestmember')]);
-		stubEmail(GUEST_EMAIL, emailMatch(20003));
-		stubLegionApi(20003, CLASSIFIED);
-		await openAudit(page);
-
-		await fix(page, 'guestmember');
-
-		expect(await getLegionId('guestmember')).toBe('20003');
-	});
-
-	test('is only looked for when there is no Legion ID on the profile, and not for banned members', async ({
-		page,
-	}) => {
-		await setLegionId('banned', '');
-		await openAudit(page, { all: true });
-
-		expect(emailRequests()).toContain(`/email/${GUEST_EMAIL}`);
-		expect(emailRequests()).not.toContain('/email/unitmember@example.test');
-		expect(emailRequests()).not.toContain('/email/banned@example.test');
-		// No match is an answer: no Legion ID, as before.
 		await expect(row(page, 'guestmember').locator('.access-audit-record')).toHaveText(
-			'No Legion ID on their profile'
+			'No Legion ID on their profile, and not looked up by email address yet'
 		);
-		await expect(row(page, 'guestmember').locator('.access-audit-found')).toHaveCount(0);
+		await expect(fixButton(page, 'guestmember')).toHaveCount(0);
 	});
 
-	test('is shared with an account that has it on their profile', async ({ page }) => {
-		// unitmember is TK-10001.
-		stubEmail(GUEST_EMAIL, emailMatch(10001));
+	test('keeps what the email lookups found through Check Again', async ({ page }) => {
 		await openAudit(page);
-
-		await expect(row(page, 'guestmember').locator('.access-audit-shared a')).toHaveText([
-			'unitmember',
-		]);
-		await expect(row(page, 'unitmember').locator('.access-audit-shared a')).toHaveText([
-			'guestmember',
-		]);
-		await expect(row(page, 'guestmember').locator('.access-audit-change')).toHaveText(
-			'Set Legion ID to 10001; Add to Garrison Members; Add to 501st Members'
-		);
-		expect(memberRequests().filter((request) => request === '/legionId/10001')).toHaveLength(1);
-	});
-
-	test('is worked out again when Fix is pressed, never taken from the page', async ({ page }) => {
-		stubEmail(GUEST_EMAIL, emailMatch(20003));
-		stubLegionApi(20003, CLASSIFIED);
-		await openAudit(page);
-		await expect(fixButton(page, 'guestmember')).toBeVisible();
-
-		// They put their own in meanwhile.
-		await setLegionId('guestmember', 'TK-10002');
-		await fix(page, 'guestmember');
-
-		expect(await getLegionId('guestmember')).toBe('TK-10002');
-		expect((await getGroups('guestmember')).additionalgroups).toEqual([groups().legion]);
-	});
-
-	const unusable: Array<[string, Parameters<typeof stubEmail>[1] | null]> = [
-		['is down', null],
-		['answers with an error', { status: 500, body: { message: 'Internal Server Error' } }],
-		['answers with something that is not JSON', { raw: '<html>Bad Gateway</html>' }],
-		['answers with something that is not a Legion ID', { body: { legionId: '<b>1</b>' } }],
-	];
-
-	for (const [answer, response] of unusable) {
-		test(`leaves a member with no Legion ID alone when the API ${answer}`, async ({ page }) => {
-			if (response) {
-				stubEmail(GUEST_EMAIL, response);
-			} else {
-				emailsDown();
-			}
-			await setGroups('guestmember', { additionalgroups: [groups().unit] });
-			await openAudit(page);
-
-			const guest = row(page, 'guestmember');
-			await expect(guest.locator('.access-audit-record')).toHaveText(
-				'Could not reach the 501st Legion API'
-			);
-			await expect(guest.locator('.access-audit-change')).toHaveText(
-				'Unknown until the API answers'
-			);
-			await expect(fixButton(page, 'guestmember')).toHaveCount(0);
-
-			const key = await page.locator('input[name="my_post_key"]').getAttribute('value');
-			await page.request.post('/admin/index.php?module=user-access_audit&action=fix', {
-				form: { my_post_key: key!, uid: String(uid('guestmember')) },
-			});
-			expect((await getGroups('guestmember')).additionalgroups).toEqual([groups().unit]);
-			expect(await getLegionId('guestmember')).toBe('');
-		});
-	}
-
-	test('answers are kept, without the address, and forgotten by Check Again', async ({ page }) => {
-		stubEmail(GUEST_EMAIL, emailMatch(20003));
-		stubLegionApi(20003, CLASSIFIED);
-		await openAudit(page);
-		const asked = emailRequests().length;
-
-		await openAudit(page);
-		expect(emailRequests()).toHaveLength(asked);
-
-		const kept = await query(`SELECT * FROM ${T('access_audit_email_lookups')}`);
-		expect(kept.length).toBe(asked);
-		expect(JSON.stringify(kept)).not.toContain('@');
-
 		await page.locator('#access_audit_refresh').click();
-		await expect(row(page, 'guestmember')).toBeVisible();
-		expect(emailRequests()).toHaveLength(asked * 2);
+		await expect(page.locator('#access_audit_count_checked')).toBeVisible();
+
+		await expect(page.locator('#access_audit_count_waiting')).toHaveCount(0);
+		expect(await query(`SELECT * FROM ${T('access_audit_email_lookups')}`)).not.toHaveLength(0);
 	});
 });
 

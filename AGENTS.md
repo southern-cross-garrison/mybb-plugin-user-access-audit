@@ -14,11 +14,14 @@
     plan and applying it.
   - `plugin/inc/plugins/access_audit/inc/access_audit_api.php` - the 501st API client and
     the table of kept answers.
+  - `plugin/inc/plugins/access_audit/inc/access_audit_lookup.php` - looking members with no
+    Legion ID up by email address, a batch at a time, and saving what is found.
+  - `plugin/inc/tasks/access_audit.php` - the scheduled task that runs those batches.
   - `plugin/inc/plugins/access_audit/inc/access_audit_install.php` - schema, upgrades,
     settings, uninstall.
   - `plugin/inc/plugins/access_audit/upgrades/` - schema upgrades (see below).
   - `plugin/admin/modules/user/access_audit.php` - the Admin CP page, Users & Groups ->
-    Access Audit, with its Audit and Settings tabs.
+    Access Audit, with its Audit, Legion IDs and Settings tabs.
   - `plugin/inc/languages/english/admin/user_access_audit.lang.php` - its strings. MyBB
     loads it by name for the page, as `<module>_<action>`.
   - `plugin/jscripts/access_audit/access-audit-admin.css` - the page's CSS.
@@ -61,6 +64,12 @@ baseline from a restored database, so the last test run's leftovers are not bake
 - An API that is down, slow or answers nonsense is never a reason to change anybody's
   groups: such a member is `ACCESS_AUDIT_UNCHECKED` and has no plan. A "Classified Record"
   is an answer, and means not active.
+- The API allows 60 `/email/{email}` lookups per address every 15 minutes (its
+  `util/rate-limit.js`); `/legionId` is not limited. So email lookups only ever happen in
+  the background batches, within `ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT`, never from the audit
+  page, and a member with no Legion ID who has not been looked up yet is unchecked.
+- The suite never loads a forum page, so MyBB's task runner never fires on its own during a
+  run; tests run the task with `runScheduledTask()`. Keep it that way.
 - A fix is worked out again on the server from the member as they are then, never taken
   from the posted form, and `access_audit_apply()` only writes if their groups are still
   the ones it was worked out from.

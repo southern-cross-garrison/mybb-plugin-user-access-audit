@@ -7,6 +7,8 @@ $l['access_audit'] = "Access Audit";
 
 $l['access_audit_tab_audit'] = "Audit";
 $l['access_audit_tab_audit_desc'] = "Every member's groups checked against their 501st Legion record. Only the unit members, reserve members, retired members and 501st members groups, and the squads' groups, are ever changed; any other group a member is in is left alone.";
+$l['access_audit_tab_legion_ids'] = "Legion IDs";
+$l['access_audit_tab_legion_ids_desc'] = "Members with no Legion ID on their profile, looked up by their email address in the background, and the Legion IDs found for them.";
 $l['access_audit_tab_settings'] = "Settings";
 $l['access_audit_tab_settings_desc'] = "Which unit this board belongs to, where members' Legion IDs are kept, and which squads and groups the audit manages.";
 
@@ -60,14 +62,15 @@ $l['access_audit_not_configured_short'] = "The audit has not been set up yet.";
 $l['access_audit_summary'] = "Summary";
 $l['access_audit_summary_rules'] = "Active members of <strong>{1}</strong> belong in both <strong>{2}</strong> and <strong>{3}</strong>, and its Reserve members in both <strong>{4}</strong> and <strong>{3}</strong>. Its Retired members belong in <strong>{5}</strong> only. Active and Reserve members of any other unit belong in <strong>{3}</strong> only. Anybody else - no Legion ID, any other status, or no public 501st record - belongs in none of them.";
 $l['access_audit_summary_squad'] = "Active members of <strong>{1}</strong> belong in <strong>{2}</strong> as well.";
-$l['access_audit_summary_email'] = "A member with no Legion ID on their profile is looked up by their email address, and a Legion ID found that way is the one they are judged by - fixing them saves it to their profile.";
+$l['access_audit_summary_email'] = "A member with no Legion ID on their profile is looked up by their email address in the background, and a Legion ID found that way is saved to their profile (see <a href=\"{1}\">Legion IDs</a>). Until then, they are not checked.";
 $l['access_audit_count_checked'] = "Members checked";
 $l['access_audit_count_ok'] = "Groups correct";
 $l['access_audit_count_fix'] = "Groups need changing";
 $l['access_audit_count_unchecked'] = "Could not be checked";
 $l['access_audit_count_banned'] = "Banned, left alone";
 $l['access_audit_count_shared'] = "Sharing a Legion ID with another member";
-$l['access_audit_count_found'] = "Legion ID found by email address";
+$l['access_audit_count_waiting'] = "Waiting to be looked up by email address";
+$l['access_audit_count_waiting_desc'] = "Members with no Legion ID on their profile, not looked up yet. See <a href=\"{1}\">Legion IDs</a> for how long that will take.";
 $l['access_audit_checked_at'] = "Checked against the 501st";
 $l['access_audit_members'] = "Members";
 $l['access_audit_show_all'] = "Show every member";
@@ -88,12 +91,11 @@ $l['access_audit_in_none'] = "None of them";
 $l['access_audit_primary'] = "(primary)";
 $l['access_audit_record_no_legion_id'] = "No Legion ID on their profile";
 $l['access_audit_record_unchecked'] = "Could not reach the 501st Legion API";
+$l['access_audit_record_waiting'] = "No Legion ID on their profile, and not looked up by email address yet";
 $l['access_audit_record_classified'] = "No public record - private, retired, or not a real Legion ID";
 $l['access_audit_record_banned'] = "Banned - MyBB restores their groups when the ban is lifted";
-$l['access_audit_found_by_email'] = "Found by email address: {1}";
 $l['access_audit_shared_with'] = "Same Legion ID as {1}. Check which account is really theirs before fixing either.";
 
-$l['access_audit_change_legion_id'] = "Set Legion ID to {1}";
 $l['access_audit_change_add'] = "Add to {1}";
 $l['access_audit_change_remove'] = "Remove from {1}";
 $l['access_audit_change_primary'] = "Primary group becomes {1}";
@@ -110,10 +112,36 @@ $l['access_audit_fixed'] = "{1} has been fixed: {2}.";
 $l['access_audit_nothing_to_fix'] = "{1}'s groups are already correct.";
 $l['access_audit_error_no_member'] = "That member does not exist.";
 $l['access_audit_error_unchecked'] = "{1} could not be checked: the 501st Legion API did not answer. Nothing was changed.";
+$l['access_audit_error_waiting'] = "{1} could not be checked: they have no Legion ID on their profile and have not been looked up by email address yet. Nothing was changed.";
 $l['access_audit_error_changed'] = "{1}'s groups were changed by somebody else while the audit ran, so nothing was changed. Check them again.";
-$l['access_audit_error_legion_id_changed'] = "{1}'s Legion ID was changed by somebody else while the audit ran, so nothing was changed. Check them again.";
-$l['access_audit_error_changed_after_legion_id'] = "{1}'s Legion ID has been set to {2}, but their groups were changed by somebody else while the audit ran, so they were left alone. Check them again.";
+
+// Legion IDs by email address.
+$l['access_audit_lookup_not_configured'] = "Members are looked up by email address once the audit has been set up on the <a href=\"{1}\">Settings</a> tab.";
+$l['access_audit_lookup_rules'] = "Members with no Legion ID on their profile are looked up by their email address, which finds the approved 501st member with it as their primary or secondary address, and a Legion ID found is saved to their profile. A Legion ID a member has typed is never replaced, and saving one changes nobody's groups: that is still the audit's, one member at a time. The 501st Legion API answers only so many of these lookups, so they are made in the background, {1} every 15 minutes, until everybody has been looked up. An address nobody has is looked up again after a week.";
+$l['access_audit_lookup_members'] = "Members with no Legion ID";
+$l['access_audit_lookup_due'] = "To look up";
+$l['access_audit_lookup_no_match'] = "Looked up, no 501st member has their address";
+$l['access_audit_lookup_found'] = "Legion IDs saved from email addresses";
+$l['access_audit_lookup_allowance'] = "Lookups the API allows now";
+$l['access_audit_lookup_allowance_value'] = "{1} of {2}";
+$l['access_audit_lookup_next'] = "Next lookups";
+$l['access_audit_lookup_next_value'] = "{1} more batches, about {2} minutes. The next run is {3}.";
+$l['access_audit_lookup_next_now'] = "due now, on the next page view of the forum";
+$l['access_audit_lookup_up_to_date'] = "Everybody has been looked up.";
+$l['access_audit_lookup_task_disabled'] = "None: the Access Audit task is disabled under Tools & Maintenance -> Task Manager.";
+$l['access_audit_lookup_found_title'] = "Legion IDs saved";
+$l['access_audit_lookup_none_found'] = "No Legion IDs have been found by email address yet.";
+$l['access_audit_lookup_now'] = "Look Up a Batch Now";
+$l['access_audit_col_found_at'] = "Saved";
+$l['access_audit_deleted_member'] = "Deleted member #{1}";
+
+// A batch's result, in the task log and on the Legion IDs tab.
+$l['access_audit_batch_result'] = "Looked up {1} email addresses. Legion IDs saved: {2}; no match: {3}; not answered: {4}. Still to look up: {5}.";
+$l['access_audit_batch_limited'] = "The 501st Legion API turned lookups away for asking too often; the rest wait for a later batch.";
+$l['access_audit_batch_no_room'] = "Nothing looked up: the 501st Legion API's limit has no room until the last batch is 15 minutes old. {1} still to look up.";
+$l['access_audit_batch_done'] = "Nothing to look up: everybody has been looked up.";
 
 // The administrator log, looked up as admin_log_user_access_audit_<action>.
 $l['admin_log_user_access_audit_fix'] = "Fixed {2} (#{1}): {3}";
 $l['admin_log_user_access_audit_settings'] = "Changed the access audit settings";
+$l['admin_log_user_access_audit_lookup'] = "Looked up {1} email addresses for Legion IDs, saving {2}";

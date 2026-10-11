@@ -44,6 +44,15 @@ async function tableExists(name: string): Promise<boolean> {
 	return (await query<RowDataPacket>(`SHOW TABLES LIKE '${T(name)}'`)).length > 0;
 }
 
+/** The scheduled task's enabled flag, or null when there is no task. */
+async function taskEnabled(): Promise<number | null> {
+	const rows = await query<RowDataPacket>(
+		`SELECT enabled FROM ${T('tasks')} WHERE file = 'access_audit'`
+	);
+	expect(rows.length).toBeLessThanOrEqual(1);
+	return rows.length ? Number(rows[0].enabled) : null;
+}
+
 async function columnNames(table: string): Promise<string[]> {
 	return (await query<RowDataPacket>(`SHOW COLUMNS FROM ${T(table)}`)).map((row) =>
 		String(row.Field)
@@ -67,10 +76,12 @@ test.beforeEach(async ({ page }) => {
 	await loginToAdminCp(page);
 });
 
-test('is installed with its tables and settings', async ({ page }) => {
+test('is installed with its tables, settings and scheduled task', async ({ page }) => {
 	expect(await tableExists('access_audit_lookups')).toBe(true);
 	expect(await tableExists('access_audit_email_lookups')).toBe(true);
+	expect(await tableExists('access_audit_found_legion_ids')).toBe(true);
 	expect(await settingNames()).toEqual(SETTINGS);
+	expect(await taskEnabled()).toBe(1);
 
 	await page.goto('/admin/index.php?module=config-settings');
 	await expect(page.locator('#content')).toContainText('Access Audit');
@@ -240,6 +251,7 @@ test('is under Users & Groups', async ({ page }) => {
 test('goes from the Admin CP when deactivated, keeping its settings', async ({ page }) => {
 	try {
 		await clickPluginLink(page, 'Deactivate');
+		expect(await taskEnabled()).toBe(0);
 
 		await page.goto('/admin/index.php?module=user-users');
 		await expect(
@@ -250,6 +262,7 @@ test('goes from the Admin CP when deactivated, keeping its settings', async ({ p
 		expect(await settingNames()).toEqual(SETTINGS);
 
 		await clickPluginLink(page, 'Activate');
+		expect(await taskEnabled()).toBe(1);
 		await gotoAudit(page);
 		await expect(page.locator('#access_audit_count_checked')).toBeVisible();
 	} finally {
@@ -267,8 +280,10 @@ test("leaves nothing behind when uninstalled, and members' groups as they are", 
 
 		expect(await tableExists('access_audit_lookups')).toBe(false);
 		expect(await tableExists('access_audit_email_lookups')).toBe(false);
+		expect(await tableExists('access_audit_found_legion_ids')).toBe(false);
 		expect(await tableExists('access_audit_schema_upgrades')).toBe(false);
 		expect(await settingNames()).toEqual([]);
+		expect(await taskEnabled()).toBeNull();
 		expect(
 			await query<RowDataPacket>(
 				`SELECT gid FROM ${T('settinggroups')} WHERE name = 'access_audit'`
@@ -281,6 +296,7 @@ test("leaves nothing behind when uninstalled, and members' groups as they are", 
 
 		await clickPluginLink(page, 'Install & Activate');
 		expect(await settingNames()).toEqual(SETTINGS);
+		expect(await taskEnabled()).toBe(1);
 		// A fresh install starts at the real API, with nothing chosen.
 		const values = await query<RowDataPacket>(
 			`SELECT name, value FROM ${T('settings')} WHERE name IN ('access_audit_api_url', 'access_audit_unit')`

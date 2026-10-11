@@ -13,8 +13,8 @@ them one at a time, after you have looked.
 - **Every member checked.** Each member's Legion ID, from the profile field you choose, is
   looked up on the 501st Legion's API.
 - **Missing Legion IDs found.** A member who has not put their Legion ID on their profile is
-  looked up by their email address, and Fix saves the Legion ID found along with their
-  groups.
+  looked up by their email address in the background, and the Legion ID found is saved to
+  their profile.
 - **Only its own groups touched.** The audit manages your unit members, reserve members,
   retired members and 501st members groups, and a group for each squad you choose, and nothing else. Command staff, moderators, administrators and any other
   group a member is in are left exactly as they are.
@@ -42,7 +42,8 @@ them one at a time, after you have looked.
 2. In the Admin CP, go to Configuration -> Plugins and click **Install & Activate** beside
    Access Audit.
 3. Go to Users & Groups -> Access Audit -> Settings and choose your unit, the Legion ID
-   profile field and the four groups, and any squads you want audited.
+   profile field and the four groups, and any squads you want audited. Saving them starts
+   looking up members with no Legion ID by email address (see below).
 
 ## Upgrading
 
@@ -51,8 +52,9 @@ Configuration -> Plugins.
 
 ## Uninstalling
 
-Deactivating removes the page from the Admin CP and keeps the settings. Uninstalling removes
-the settings and the plugin's table too. Members' groups are never changed by either.
+Deactivating removes the page from the Admin CP, turns the scheduled task off and keeps the
+settings. Uninstalling removes the settings, the plugin's tables and its scheduled task too.
+Members' groups, and Legion IDs saved to their profiles, are never changed by either.
 
 ## Settings
 
@@ -111,8 +113,8 @@ group, whichever unit the squad is in. Nobody else belongs in it: a member who h
 squad, gone to the reserve or is no longer a 501st member is taken out of it. A squad you
 have not chosen means nothing to the audit, and neither does its group.
 
-A member with no Legion ID on their profile is looked up by email address first (see below),
-and a Legion ID found that way is the one the rules above go by.
+A member with no Legion ID on their profile is looked up by email address in the background
+(see below), and is not checked until they have been.
 
 "No public record" is what the API says both for a member who has made their record private
 and for an ID that does not exist, and in practice it is mostly members who have left or
@@ -125,22 +127,38 @@ flagged for removal from the retired members group.
 
 A member with no Legion ID on their profile - or none with a number in it - is looked up on
 the API by their forum email address, which finds the approved 501st member with that
-address as their primary or secondary one. If one is found:
+address as their primary or secondary one. A Legion ID found is saved to their Legion ID
+profile field. Saving it changes none of their groups: the audit then judges them by it like
+any other Legion ID, and their groups are fixed one at a time as usual, with their 501st
+record on the row to check it against.
 
-- their row says "Found by email address" with the Legion ID, linked to its record on
-  501st.com, and the audit judges them by that record as if they had typed it in;
-- the change offered starts with "Set Legion ID to 12345", followed by whatever their groups
-  need for that record - which may be nothing else;
-- pressing Fix saves the number to their Legion ID profile field, then changes their groups.
+The API answers only 60 of these lookups from one address every 15 minutes, so they are made
+in the background by a scheduled task, Access Audit: Legion IDs by email address, under Tools
+& Maintenance -> Task Manager. It runs every five minutes and looks up as many members as the
+limit has room for - 50 every 15 minutes, keeping a little short of it - until everybody has
+been looked up. On a board of 600 members with no Legion ID that is about three hours. Saving
+the settings starts it straight away. MyBB runs scheduled tasks on page views of the forum,
+so a quiet forum runs it less often.
 
-A Legion ID a member has typed in is never replaced, even if their email address belongs to
-somebody else's. Banned members are not looked up. If the API does not answer for a member's
-email address, they are shown as not checked and cannot be changed, just as when it does not
-answer for a Legion ID; an address no approved member has is an answer, and means no Legion
-ID.
+Users & Groups -> Access Audit -> **Legion IDs** shows how far it has got: how many members
+are still to be looked up and about how long that will take, how many no 501st member has the
+address of, the Legion IDs it has saved, and when it next runs. **Look Up a Batch Now** runs a
+batch straight away, out of the same allowance.
 
-A Legion ID found by email counts towards shared Legion IDs like any other, so an account
-whose address matches an ID another account has typed in is flagged on both rows.
+- A Legion ID a member has typed in is never replaced, even if their email address belongs to
+  somebody else's.
+- A Legion ID it saved that somebody has since taken off the member's profile is never saved
+  again - for a member who shares an email address with the partner who is the 501st member,
+  say.
+- Banned members are not looked up.
+- An address no approved member has is looked up again after a week, for a member who has
+  joined the 501st since or given it the address they use here.
+- If the API does not answer, or turns lookups away for asking too often, nothing is kept and
+  the member is looked up in a later batch.
+
+Until a member has been looked up, the audit shows them as not looked up yet, counts them in
+its summary, and will not change their groups. A Legion ID found by email counts towards
+shared Legion IDs like any other once it is saved.
 
 Members' email addresses are sent to the 501st Legion API for this, and only for members
 with no Legion ID.
@@ -192,20 +210,21 @@ Administrators with "Can manage users?" under Admin Permissions -> Users & Group
 ## Checking against the 501st
 
 Answers from the API are kept for 15 minutes, so fixing members one by one does not ask the
-API about everybody again after each - email address lookups included. **Check Again**
-forgets them. An answer the API could not give is never kept, so it is asked for again next
-time.
+API about everybody again after each. **Check Again** forgets them, but not the answers to
+email address lookups, which take hours to ask again (see above). An answer the API could not
+give is never kept, so it is asked for again next time.
 
 ## Database tables
 
-| Table                        | Holds                                                                                                  |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `access_audit_lookups`       | The API's recent answers, by Legion ID                                                                 |
-| `access_audit_email_lookups` | The API's recent answers to email address lookups, by a hash of the address - never the address itself |
+| Table                           | Holds                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `access_audit_lookups`          | The API's recent answers, by Legion ID                                                          |
+| `access_audit_email_lookups`    | The API's answers to email address lookups, by a hash of the address - never the address itself |
+| `access_audit_found_legion_ids` | The Legion IDs the email address lookups have saved to members' profiles                        |
+| `access_audit_schema_upgrades`  | Which schema upgrades the board has had                                                         |
 
 Upgrading to the release with squads forgets the answers kept so far, so the first audit
 afterwards asks the API about everybody again.
-| `access_audit_schema_upgrades` | Which schema upgrades the board has had |
 
 ## License
 

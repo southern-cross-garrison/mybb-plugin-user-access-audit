@@ -35,7 +35,7 @@ function access_audit_info()
 {
     return array(
         "name"          => "Access Audit",
-        "description"   => "Audits members' group access against their 501st Legion membership: every Active or Reserve 501st member in the 501st group, the unit's own in its active or reserve group as well, the unit's retired members in its retired group alone, active members of chosen squads in each squad's group, and everybody else in none of them.",
+        "description"   => "Audits members' group access against their 501st Legion membership: every Active or Reserve 501st member in the 501st group, the unit's own in its active or reserve group as well, the unit's retired members in its retired group alone, active members of chosen squads in each squad's group, and everybody else in none of them. Members with no Legion ID on their profile are looked up by email address in the background.",
         "website"       => "https://github.com/southern-cross-garrison/mybb-plugin-user-access-audit",
         "author"        => "Kevin Brown (TK-33151)",
         "authorsite"    => "https://www.501scg.org/",
@@ -71,7 +71,7 @@ function access_audit_install()
 }
 
 /**
- * Activate: bring the schema and settings up to date.
+ * Activate: bring the schema and settings up to date, and turn the scheduled task on.
  */
 function access_audit_activate()
 {
@@ -81,18 +81,23 @@ function access_audit_activate()
     // once, on a board that has no tables yet.
     access_audit_upgrade_database();
     access_audit_install_settings();
+    access_audit_enable_task();
 }
 
 /**
- * Deactivate. There is nothing to take out: the plugin adds no templates, and the Admin CP
- * page goes with the hooks that register it. Settings and cached lookups are kept.
+ * Deactivate: turn the scheduled task off. The plugin adds no templates, and the Admin CP
+ * page goes with the hooks that register it. Settings and kept answers are kept.
  */
 function access_audit_deactivate()
 {
+    require_once MYBB_ROOT . "inc/plugins/access_audit/inc/access_audit_install.php";
+
+    access_audit_disable_task();
 }
 
 /**
- * Remove every trace of the plugin. Members' groups are left as they are.
+ * Remove every trace of the plugin. Members' groups, and Legion IDs the email lookups saved
+ * to their profiles, are left as they are.
  */
 function access_audit_uninstall()
 {

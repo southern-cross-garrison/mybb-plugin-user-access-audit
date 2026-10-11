@@ -3,8 +3,9 @@
  * MyBB Access Audit Plugin - Admin CP: Users & Groups -> Access Audit
  *
  * The audit: every member, what the 501st's records say about them, and what has to
- * change for their groups to match, fixed one member at a time. And the Settings
- * tab, which says which unit, which squads and which groups the audit is about.
+ * change for their groups to match, fixed one member at a time. The Legion IDs tab, which
+ * shows how far looking members up by email address has got. And the Settings tab, which
+ * says which unit, which squads and which groups the audit is about.
  */
 
 if(!defined("IN_MYBB"))
@@ -12,7 +13,7 @@ if(!defined("IN_MYBB"))
     die("Direct initialization of this file is not allowed.");
 }
 
-require_once MYBB_ROOT . "inc/plugins/access_audit/inc/access_audit_functions.php";
+require_once MYBB_ROOT . "inc/plugins/access_audit/inc/access_audit_lookup.php";
 
 /** @var DefaultPage $page */
 
@@ -37,6 +38,11 @@ $sub_tabs = array(
         'title'       => $lang->access_audit_tab_audit,
         'link'        => $base_url,
         'description' => $lang->access_audit_tab_audit_desc
+    ),
+    'legion_ids' => array(
+        'title'       => $lang->access_audit_tab_legion_ids,
+        'link'        => "{$base_url}&amp;action=legion_ids",
+        'description' => $lang->access_audit_tab_legion_ids_desc
     ),
     'settings' => array(
         'title'       => $lang->access_audit_tab_settings,
@@ -103,7 +109,8 @@ if($action == "fix")
 
     if($result['verdict'] === ACCESS_AUDIT_UNCHECKED)
     {
-        flash_message($lang->sprintf($lang->access_audit_error_unchecked, $username), 'error');
+        $error = $result['waiting'] ? $lang->access_audit_error_waiting : $lang->access_audit_error_unchecked;
+        flash_message($lang->sprintf($error, $username), 'error');
         admin_redirect($audit_url);
     }
 
@@ -115,34 +122,13 @@ if($action == "fix")
 
     $plan = $result['plan'];
 
-    // The Legion ID found by email first: the groups were worked out from it, so they are
-    // only changed once it is on the member's profile to say why.
-    if($plan['legion_id'] > 0 && !access_audit_save_legion_id($member, $plan['legion_id'], $config))
+    if(!access_audit_apply($member, $plan))
     {
-        flash_message($lang->sprintf($lang->access_audit_error_legion_id_changed, $username), 'error');
+        flash_message($lang->sprintf($lang->access_audit_error_changed, $username), 'error');
         admin_redirect($audit_url);
     }
 
-    if($plan['groups_changed'])
-    {
-        if(!access_audit_apply($member, $plan))
-        {
-            if($plan['legion_id'] > 0)
-            {
-                // The Legion ID is saved, and is the member's whatever their groups are, so
-                // that much is logged and said.
-                log_admin_action((int)$member['uid'], $member['username'], $lang->sprintf($lang->access_audit_change_legion_id, $plan['legion_id']));
-                flash_message($lang->sprintf($lang->access_audit_error_changed_after_legion_id, $username, $plan['legion_id']), 'error');
-            }
-            else
-            {
-                flash_message($lang->sprintf($lang->access_audit_error_changed, $username), 'error');
-            }
-            admin_redirect($audit_url);
-        }
-
-        $cache->update_moderators();
-    }
+    $cache->update_moderators();
 
     log_admin_action((int)$member['uid'], $member['username'], access_audit_describe_plan($plan, false));
 
@@ -158,9 +144,124 @@ if($action == "refresh")
 {
     access_audit_admin_require_post();
 
-    access_audit_forget_lookups();
+    // Members' records only: the API rations email lookups, and their answers are kept for
+    // a day instead (see access_audit_forget_lookups()).
+    access_audit_forget_lookups(false);
 
     admin_redirect($audit_url);
+}
+
+// ---------------------------------------------------------------------------
+// Look up a batch now
+// ---------------------------------------------------------------------------
+
+if($action == "lookup")
+{
+    access_audit_admin_require_post();
+
+    $config = access_audit_config();
+    access_audit_admin_require_config($config);
+
+    // The same batch the scheduled task runs, from the same allowance, so pressing this
+    // never asks the API more than the task would.
+    $result = access_audit_lookup_batch($config);
+    if($result['asked'] > 0)
+    {
+        log_admin_action($result['asked'], $result['saved']);
+    }
+
+    $waited = $result['asked'] === 0 && $result['remaining'] > 0;
+    flash_message(htmlspecialchars_uni(access_audit_describe_batch($result)), $waited || $result['limited'] ? 'error' : 'success');
+    admin_redirect("{$base_url}&action=legion_ids");
+}
+
+// ---------------------------------------------------------------------------
+// Legion IDs by email address
+// ---------------------------------------------------------------------------
+
+if($action == "legion_ids")
+{
+    $page->add_breadcrumb_item($lang->access_audit_tab_legion_ids);
+    $page->output_header($lang->access_audit . " - " . $lang->access_audit_tab_legion_ids);
+    $page->output_nav_tabs($sub_tabs, 'legion_ids');
+
+    $config = access_audit_config();
+    if($config['missing'])
+    {
+        echo "<div class=\"access-audit-warning\" id=\"access_audit_not_configured\">"
+            . $lang->sprintf($lang->access_audit_lookup_not_configured, "{$base_url}&amp;action=settings")
+            . "</div>";
+        $page->output_footer();
+        exit;
+    }
+
+    $progress = access_audit_lookup_progress($config);
+
+    $summary = new Table;
+    $summary->construct_cell($lang->sprintf($lang->access_audit_lookup_rules, ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT), array('colspan' => 2, 'id' => 'access_audit_lookup_rules'));
+    $summary->construct_row();
+    foreach(array('members', 'due', 'no_match', 'found') as $key)
+    {
+        $label = "access_audit_lookup_{$key}";
+        $summary->construct_cell($lang->$label, array('width' => '30%'));
+        $summary->construct_cell(my_number_format($progress[$key]), array('id' => "access_audit_lookup_{$key}"));
+        $summary->construct_row();
+    }
+
+    $summary->construct_cell($lang->access_audit_lookup_allowance);
+    $summary->construct_cell($lang->sprintf($lang->access_audit_lookup_allowance_value, my_number_format($progress['allowance']), ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT), array('id' => 'access_audit_lookup_allowance'));
+    $summary->construct_row();
+
+    if($progress['next_run'] === null)
+    {
+        $next = "<span class=\"access-audit-error\">{$lang->access_audit_lookup_task_disabled}</span>";
+    }
+    elseif($progress['due'] === 0)
+    {
+        $next = $lang->access_audit_lookup_up_to_date;
+    }
+    else
+    {
+        // MyBB runs a task on the first page view of the forum after it is due, so one can
+        // be due and not have run yet.
+        $when = $progress['next_run'] > TIME_NOW ? my_date('relative', $progress['next_run']) : $lang->access_audit_lookup_next_now;
+        // Fifteen minutes a batch, the API's window, whatever the task's own schedule.
+        $next = $lang->sprintf($lang->access_audit_lookup_next_value,
+            my_number_format($progress['batches']),
+            my_number_format($progress['batches'] * 15),
+            $when);
+    }
+    $summary->construct_cell($lang->access_audit_lookup_next);
+    $summary->construct_cell($next, array('id' => 'access_audit_lookup_next'));
+    $summary->construct_row();
+    $summary->output($lang->access_audit_summary);
+
+    $table = new Table;
+    $table->construct_header($lang->access_audit_col_member);
+    $table->construct_header($lang->access_audit_col_legion_id);
+    $table->construct_header($lang->access_audit_col_found_at);
+    foreach(access_audit_found_legion_ids() as $found)
+    {
+        $member_html = $found['username'] === null
+            ? "<span class=\"access-audit-muted\">" . $lang->sprintf($lang->access_audit_deleted_member, $found['uid']) . "</span>"
+            : "<a href=\"index.php?module=user-users&amp;action=edit&amp;uid={$found['uid']}\">" . htmlspecialchars_uni($found['username']) . "</a>";
+        $table->construct_cell($member_html, array('class' => 'access-audit-member'));
+        $table->construct_cell("<a href=\"https://501st.com/member/{$found['legion_id']}\" target=\"_blank\" rel=\"noopener noreferrer\">{$found['legion_id']}</a>", array('class' => 'access-audit-legion-id'));
+        $table->construct_cell(my_date('relative', $found['found_at']));
+        $table->construct_row(array('id' => "access_audit_found_{$found['uid']}", 'class' => 'access-audit-found-row'));
+    }
+    if($table->num_rows() == 0)
+    {
+        $table->construct_cell($lang->access_audit_lookup_none_found, array('colspan' => 3, 'id' => 'access_audit_found_empty'));
+        $table->construct_row();
+    }
+    $table->output($lang->access_audit_lookup_found_title);
+
+    $form = new Form("{$base_url}&amp;action=lookup", "post", "access_audit_lookup_form");
+    $form->output_submit_wrapper(array($form->generate_submit_button($lang->access_audit_lookup_now, array('id' => 'access_audit_lookup_now'))));
+    $form->end();
+
+    $page->output_footer();
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +500,13 @@ if($action == "settings")
                 access_audit_forget_lookups();
             }
 
+            // Looking members up by email address takes hours on a big board, so it starts
+            // with the next page view rather than at the task's next turn.
+            if(!access_audit_config()['missing'])
+            {
+                access_audit_schedule_lookups();
+            }
+
             log_admin_action();
 
             flash_message($lang->access_audit_settings_saved, 'success');
@@ -591,7 +699,7 @@ if(!$action)
 
     $results = access_audit_evaluate($config, access_audit_members($config));
 
-    $counts = array('checked' => count($results), 'ok' => 0, 'fix' => 0, 'unchecked' => 0, 'banned' => 0, 'shared' => 0, 'found' => 0);
+    $counts = array('checked' => count($results), 'ok' => 0, 'fix' => 0, 'unchecked' => 0, 'banned' => 0, 'shared' => 0, 'waiting' => 0);
     foreach($results as $result)
     {
         // Counted on top of whatever else is said about the member.
@@ -599,9 +707,9 @@ if(!$action)
         {
             $counts['shared']++;
         }
-        if($result['found_legion_id'] > 0)
+        if($result['waiting'])
         {
-            $counts['found']++;
+            $counts['waiting']++;
         }
 
         if($result['verdict'] === ACCESS_AUDIT_BANNED)
@@ -637,16 +745,24 @@ if(!$action)
             htmlspecialchars_uni(access_audit_squad_name($squad)),
             access_audit_group_name($squad['group']));
     }
-    $rules .= ' ' . $lang->access_audit_summary_email;
+    $rules .= ' ' . $lang->sprintf($lang->access_audit_summary_email, "{$base_url}&amp;action=legion_ids");
 
     $summary = new Table;
     $summary->construct_cell($rules, array('colspan' => 2, 'id' => 'access_audit_rules'));
     $summary->construct_row();
-    foreach(array('checked', 'ok', 'fix', 'unchecked', 'banned', 'shared', 'found') as $key)
+    foreach(array('checked', 'ok', 'fix', 'unchecked', 'banned', 'shared') as $key)
     {
         $label = "access_audit_count_{$key}";
         $summary->construct_cell($lang->$label, array('width' => '30%'));
         $summary->construct_cell(my_number_format($counts[$key]), array('id' => "access_audit_count_{$key}"));
+        $summary->construct_row();
+    }
+    // Only while there are any: on a board with few members missing a Legion ID, never.
+    if($counts['waiting'] > 0)
+    {
+        $summary->construct_cell($lang->access_audit_count_waiting
+            . "<div class=\"smalltext\">" . $lang->sprintf($lang->access_audit_count_waiting_desc, "{$base_url}&amp;action=legion_ids") . "</div>");
+        $summary->construct_cell(my_number_format($counts['waiting']), array('id' => 'access_audit_count_waiting'));
         $summary->construct_row();
     }
     if($oldest !== null)
@@ -717,20 +833,8 @@ if(!$action)
 
         // As the member typed it, linked to their record on 501st.com by the number it was
         // read as, so whoever acts on the row can look at the record first - and a mistyped
-        // ID is one click from showing whose it really is. Nothing to link without a number,
-        // unless one was found by their email address, which is linked beneath.
-        if($result['found_legion_id'] > 0)
-        {
-            $found = (int)$result['found_legion_id'];
-            $legion_id_html = ($member['legion_id'] === ''
-                    ? "<span class=\"access-audit-muted\">{$lang->access_audit_none}</span>"
-                    : htmlspecialchars_uni($member['legion_id']))
-                . "<div class=\"access-audit-found smalltext\">"
-                . $lang->sprintf($lang->access_audit_found_by_email,
-                    "<a href=\"https://501st.com/member/{$found}\" target=\"_blank\" rel=\"noopener noreferrer\">{$found}</a>")
-                . "</div>";
-        }
-        elseif($member['legion_id'] === '')
+        // ID is one click from showing whose it really is. Nothing to link without a number.
+        if($member['legion_id'] === '')
         {
             $legion_id_html = "<span class=\"access-audit-muted\">{$lang->access_audit_none}</span>";
         }
@@ -755,7 +859,9 @@ if(!$action)
                 $record_html = $lang->access_audit_record_no_legion_id;
                 break;
             case ACCESS_AUDIT_UNCHECKED:
-                $record_html = "<span class=\"access-audit-error\">{$lang->access_audit_record_unchecked}</span>";
+                $record_html = $result['waiting']
+                    ? "<span class=\"access-audit-muted\">{$lang->access_audit_record_waiting}</span>"
+                    : "<span class=\"access-audit-error\">{$lang->access_audit_record_unchecked}</span>";
                 break;
             default:
                 if($record['status'] === ACCESS_AUDIT_CLASSIFIED)
@@ -822,10 +928,6 @@ if(!$action)
         if($result['shared_with'])
         {
             $classes[] = 'access-audit-shared-id';
-        }
-        if($result['found_legion_id'] > 0)
-        {
-            $classes[] = 'access-audit-found-id';
         }
         $table->construct_row(array('id' => "access_audit_row_{$uid}", 'class' => implode(' ', $classes)));
     }
