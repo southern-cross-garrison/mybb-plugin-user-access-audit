@@ -165,12 +165,12 @@ if($action == "lookup")
     // The same batch the scheduled task runs, from the same allowance, so pressing this
     // never asks the API more than the task would.
     $result = access_audit_lookup_batch($config);
-    if($result['asked'] > 0)
+    if($result['asked'] > 0 || $result['saved'] > 0)
     {
         log_admin_action($result['asked'], $result['saved']);
     }
 
-    $waited = $result['asked'] === 0 && $result['remaining'] > 0;
+    $waited = $result['asked'] === 0 && $result['saved'] === 0 && $result['remaining'] > 0;
     flash_message(htmlspecialchars_uni(access_audit_describe_batch($result)), $waited || $result['limited'] ? 'error' : 'success');
     admin_redirect("{$base_url}&action=legion_ids");
 }
@@ -200,8 +200,13 @@ if($action == "legion_ids")
     $summary = new Table;
     $summary->construct_cell($lang->sprintf($lang->access_audit_lookup_rules, ACCESS_AUDIT_EMAIL_LOOKUP_LIMIT), array('colspan' => 2, 'id' => 'access_audit_lookup_rules'));
     $summary->construct_row();
-    foreach(array('members', 'due', 'no_match', 'found') as $key)
+    foreach(array('members', 'never', 'unsaved', 'recheck', 'no_match', 'found') as $key)
     {
+        // Only while there are any: on most boards, most of the time, there are none.
+        if(($key === 'unsaved' || $key === 'recheck') && $progress[$key] === 0)
+        {
+            continue;
+        }
         $label = "access_audit_lookup_{$key}";
         $summary->construct_cell($lang->$label, array('width' => '30%'));
         $summary->construct_cell(my_number_format($progress[$key]), array('id' => "access_audit_lookup_{$key}"));
@@ -216,7 +221,7 @@ if($action == "legion_ids")
     {
         $next = "<span class=\"access-audit-error\">{$lang->access_audit_lookup_task_disabled}</span>";
     }
-    elseif($progress['due'] === 0)
+    elseif($progress['due'] === 0 && $progress['unsaved'] === 0)
     {
         $next = $lang->access_audit_lookup_up_to_date;
     }
@@ -226,10 +231,12 @@ if($action == "legion_ids")
         // be due and not have run yet.
         $when = $progress['next_run'] > TIME_NOW ? my_date('relative', $progress['next_run']) : $lang->access_audit_lookup_next_now;
         // Fifteen minutes a batch, the API's window, whatever the task's own schedule.
-        $next = $lang->sprintf($lang->access_audit_lookup_next_value,
-            my_number_format($progress['batches']),
-            my_number_format($progress['batches'] * 15),
-            $when);
+        $next = $progress['due'] === 0
+            ? $lang->sprintf($lang->access_audit_lookup_next_save, $when)
+            : $lang->sprintf($lang->access_audit_lookup_next_value,
+                my_number_format($progress['batches']),
+                my_number_format($progress['batches'] * 15),
+                $when);
     }
     $summary->construct_cell($lang->access_audit_lookup_next);
     $summary->construct_cell($next, array('id' => 'access_audit_lookup_next'));

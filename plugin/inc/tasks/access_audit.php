@@ -16,7 +16,7 @@ if(!defined("IN_MYBB"))
 require_once MYBB_ROOT . "inc/plugins/access_audit/inc/access_audit_lookup.php";
 
 /**
- * Run one batch, and log what it did. A run that asked nothing is not logged, or there would
+ * Run one batch, and log what it did. A run that did nothing is not logged, or there would
  * be an entry every five minutes once everybody has been looked up.
  *
  * @param array $task
@@ -36,7 +36,7 @@ function task_access_audit($task)
     }
 
     $result = access_audit_lookup_batch($config);
-    if($result['asked'] > 0)
+    if($result['asked'] > 0 || $result['saved'] > 0)
     {
         add_task_log($task, access_audit_describe_batch($result));
     }

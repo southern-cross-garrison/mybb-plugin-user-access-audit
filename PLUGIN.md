@@ -1,33 +1,25 @@
 # MyBB Access Audit Plugin
 
-Checks every forum member's groups against their 501st Legion record. Every Active or
-Reserve 501st member belongs in a 501st members group; your unit's own Active members belong
-in your unit members group as well, and its Reserve members in your reserve members group;
-your unit's Retired members belong in your retired members group and nothing else;
-Active members of a squad you choose belong in that squad's group; everybody else belongs in
-none of them. The audit lists who is in the wrong place and fixes
-them one at a time, after you have looked.
+Checks every forum member's groups against their 501st Legion record, lists the members in
+the wrong groups, and fixes them one member at a time.
 
 ## Features
 
 - **Every member checked.** Each member's Legion ID, from the profile field you choose, is
   looked up on the 501st Legion's API.
-- **Missing Legion IDs found.** A member who has not put their Legion ID on their profile is
-  looked up by their email address in the background, and the Legion ID found is saved to
-  their profile.
-- **Only its own groups touched.** The audit manages your unit members, reserve members,
-  retired members and 501st members groups, and a group for each squad you choose, and nothing else. Command staff, moderators, administrators and any other
-  group a member is in are left exactly as they are.
-- **One member at a time.** Each row has its own Fix button. There is deliberately no way to
-  fix everybody at once: every change gives somebody access or takes it away.
-- **A link to their record.** Each member's Legion ID links to their page on 501st.com, so
-  you can check it before you press Fix.
-- **Their posts a click away.** Each row shows how many posts the member has made, linked to
-  a search of them, so you can see whether an account is really in use.
-- **Shared Legion IDs flagged.** Two accounts on the same Legion ID are noted on each other's
-  rows, and the table is sorted by Legion ID so they sit together.
-- **Safe when the API is down.** A member the API could not answer for is shown as such, and
-  cannot be changed until it does.
+- **Missing Legion IDs found.** Members with no Legion ID on their profile are looked up by
+  email address in the background, and any Legion ID found is saved to their profile.
+- **Only its own groups touched.** The audit changes only your unit members, reserve
+  members, retired members and 501st members groups, and each chosen squad's group. A
+  member's other groups are left alone.
+- **One member at a time.** Each row has its own Fix button. There is no bulk fix.
+- **A link to their record.** Each member's Legion ID links to their page on 501st.com.
+- **Their posts a click away.** Each row shows the member's post count, linked to a search
+  of their posts.
+- **Shared Legion IDs flagged.** Accounts with the same Legion ID are noted on each other's
+  rows.
+- **Safe when the API is down.** A member the API did not answer for is shown as unchecked
+  and cannot be changed.
 
 ## Requirements
 
@@ -54,43 +46,40 @@ Configuration -> Plugins.
 
 Deactivating removes the page from the Admin CP, turns the scheduled task off and keeps the
 settings. Uninstalling removes the settings, the plugin's tables and its scheduled task too.
-Members' groups, and Legion IDs saved to their profiles, are never changed by either.
+Neither changes members' groups or the Legion IDs saved to their profiles.
 
 ## Settings
 
 Under Users & Groups -> Access Audit -> Settings:
 
-| Setting                 | What it does                                                                  |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| 501st Legion API        | Where records are fetched from. Starts as `https://api.501st.com`.            |
-| Unit                    | Your garrison or outpost, from the 501st's own list of units.                 |
-| Legion ID profile field | The custom profile field that holds members' Legion IDs.                      |
-| Unit members group      | Where Active members of your unit belong.                                     |
-| Reserve members group   | Where Reserve members of your unit belong.                                    |
-| Retired members group   | Where Retired members of your unit belong, and in none of the others.         |
-| 501st members group     | Where every Active or Reserve 501st member belongs, your unit's own included. |
+| Setting                 | What it does                                                       |
+| ----------------------- | ------------------------------------------------------------------ |
+| 501st Legion API        | Where records are fetched from. Starts as `https://api.501st.com`. |
+| Unit                    | Your garrison or outpost, from the 501st's list of units.          |
+| Legion ID profile field | The custom profile field that holds members' Legion IDs.           |
+| Unit members group      | For Active members of your unit.                                   |
+| Reserve members group   | For Reserve members of your unit.                                  |
+| Retired members group   | For Retired members of your unit.                                  |
+| 501st members group     | For Active and Reserve members of any unit, your own included.     |
 
-The four groups must all be different groups.
+The four groups must all be different.
 
 ### Squads
 
-Below those, the **Squads** table lists your unit's squads, one per row, each with the group its
-Active members belong in. Squads are optional and come on top of the rules above. Choose a
-squad's group to audit it, and set it back to Choose... to stop auditing it.
+The **Squads** table lists your unit's squads. Choose a squad's group to audit it, or leave
+it at Choose... to not audit it. Each squad's group must be different from every other
+squad's and from the four groups above.
 
-Each squad's group must be a group of its own, not another squad's and not one of the four
-groups above. Only the squads of the unit saved above are listed. The 501st's list of squads does not
-say which unit each belongs to, so the plugin looks up each squad's officers and goes by the
-unit on their records. A squad with no officer on a public record cannot be placed, and is
-not listed. If you change the unit, saving lists the new unit's squads, along with the old
-unit's that still have a group; set those back to Choose... to save the change. A unit with no
-squads on the 501st's records has no Squads table at all.
+A squad's unit is taken from its officers' 501st records, so a squad with no officer on a
+public record is not listed. After changing the unit, the old unit's squads that still have
+a group stay listed until you set them back to Choose.... A unit with no squads has no
+Squads table.
 
-While the API is down, the squads already chosen can still be kept, moved to another group or
-taken off, but new ones cannot be added.
+While the API is down, squads already chosen can be kept, changed or removed, but new ones
+cannot be added.
 
-They also appear under Configuration -> Settings -> Access Audit, but as plain boxes; use
-the plugin's own tab, which offers the lists.
+The settings also appear under Configuration -> Settings -> Access Audit as plain text
+boxes; use the plugin's own tab instead.
 
 ## The rules
 
@@ -108,100 +97,73 @@ A Legion ID is read as its digits, so "TK-12345", "TK 12345" and "12345" are all
 
 A Retired member of another unit belongs in none of the groups.
 
-On top of that, a member who is Active in one of the squads you chose belongs in that squad's
-group, whichever unit the squad is in. Nobody else belongs in it: a member who has left the
-squad, gone to the reserve or is no longer a 501st member is taken out of it. A squad you
-have not chosen means nothing to the audit, and neither does its group.
+A member who is Active in a chosen squad, whichever unit it is in, also belongs in that
+squad's group, and everybody else is removed from it. Squads that are not chosen, and their
+groups, are ignored.
 
-A member with no Legion ID on their profile is looked up by email address in the background
-(see below), and is not checked until they have been.
+Members with no Legion ID on their profile are looked up by email address (see below), and
+are not checked until then.
 
-"No public record" is what the API says both for a member who has made their record private
-and for an ID that does not exist, and in practice it is mostly members who have left or
-retired. An active member with a private record will be flagged for removal; they can make
-their record public on 501st.com, or you can leave their row alone. The same goes for a retired
-member: only a public record says they are Retired, so one with a private record will be
-flagged for removal from the retired members group.
+"No public record" is the API's answer both for a private record and for an ID that does
+not exist. A member with a private record, Active or Retired, is flagged for removal; they
+can make their record public on 501st.com, or you can leave their row alone.
 
 ## Legion IDs found by email address
 
-A member with no Legion ID on their profile - or none with a number in it - is looked up on
-the API by their forum email address, which finds the approved 501st member with that
-address as their primary or secondary one. A Legion ID found is saved to their Legion ID
-profile field. Saving it changes none of their groups: the audit then judges them by it like
-any other Legion ID, and their groups are fixed one at a time as usual, with their 501st
-record on the row to check it against.
+A member with no Legion ID on their profile (or none with a number in it) is looked up by
+their forum email address, which is matched against approved 501st members' primary and
+secondary addresses. A Legion ID found is saved to their Legion ID profile field. No groups
+are changed; the audit then checks them like any other member.
 
-The API answers only 60 of these lookups from one address every 15 minutes, so they are made
-in the background by a scheduled task, Access Audit: Legion IDs by email address, under Tools
-& Maintenance -> Task Manager. It runs every five minutes and looks up as many members as the
-limit has room for - 50 every 15 minutes, keeping a little short of it - until everybody has
-been looked up. On a board of 600 members with no Legion ID that is about three hours. Saving
-the settings starts it straight away. MyBB runs scheduled tasks on page views of the forum,
-so a quiet forum runs it less often.
+The lookups are made by a scheduled task, Access Audit: Legion IDs by email address, under
+Tools & Maintenance -> Task Manager. It runs every five minutes and makes up to 50 lookups
+every 15 minutes (the API allows 60) until everybody has been looked up - about three hours
+for 600 members. Saving the settings starts it straight away. MyBB runs scheduled tasks on
+forum page views, so on a quiet forum it runs less often.
 
-Users & Groups -> Access Audit -> **Legion IDs** shows how far it has got: how many members
-are still to be looked up and about how long that will take, how many no 501st member has the
-address of, the Legion IDs it has saved, and when it next runs. **Look Up a Batch Now** runs a
-batch straight away, out of the same allowance.
+Users & Groups -> Access Audit -> **Legion IDs** shows how many members are still to be
+looked up and about how long that will take, how many had no match, the Legion IDs saved,
+and when the task next runs. **Look Up a Batch Now** runs a batch straight away, from the
+same allowance.
 
-- A Legion ID a member has typed in is never replaced, even if their email address belongs to
-  somebody else's.
-- A Legion ID it saved that somebody has since taken off the member's profile is never saved
-  again - for a member who shares an email address with the partner who is the 501st member,
-  say.
+- A Legion ID a member typed is never replaced.
+- A saved Legion ID that is later removed from the member's profile is not saved again.
 - Banned members are not looked up.
-- An address no approved member has is looked up again after a week, for a member who has
-  joined the 501st since or given it the address they use here.
-- If the API does not answer, or turns lookups away for asking too often, nothing is kept and
-  the member is looked up in a later batch.
+- An address with no match is looked up again after a week.
+- If the API does not answer, or turns lookups away, the member is looked up in a later
+  batch.
 
-Until a member has been looked up, the audit shows them as not looked up yet, counts them in
-its summary, and will not change their groups. A Legion ID found by email counts towards
-shared Legion IDs like any other once it is saved.
+Until a member has been looked up, the audit shows them as not looked up yet and does not
+change their groups.
 
-Members' email addresses are sent to the 501st Legion API for this, and only for members
-with no Legion ID.
+Email addresses are sent to the 501st Legion API only for members with no Legion ID.
 
 ## Shared Legion IDs
 
-The 501st's record belongs to the Legion ID, not to the forum account, so the API cannot
-tell the real member from somebody who has typed their ID into a second account. When more
-than one account has the same Legion ID - however it was typed - each of their rows says
-which other accounts have it, and they are listed even if their groups are right. Banned
-accounts count, since an ID shared with one is how a ban gets dodged.
+When more than one account has the same Legion ID, however it was typed, each of their rows
+lists the others, even if their groups are correct. Banned accounts are included. The audit
+applies the rules to each account separately, so check which account is really the member's
+before pressing Fix on either.
 
-The audit still says what the rules say for each account, so a second account on an active
-member's ID will be flagged to join the group. Check which account is really theirs before
-pressing Fix on either.
-
-The table is sorted by Legion ID, then username, with members who have none last, so
-accounts sharing an ID are next to each other.
+The table is sorted by Legion ID, then username, with members who have none last.
 
 ## Banned members
 
-Members of a banned group are skipped: MyBB puts their groups back as they were when a ban
-is lifted, so anything changed now would be undone then.
+Members of a banned group are skipped.
 
 ## How a fix changes groups
 
-A Legion ID found by email is saved first, and only if their Legion ID field is still as it
-was when the audit worked it out; if somebody has changed it in the meantime, nothing is
-changed.
-
 - Joining a group adds it to the member's additional groups.
-- Leaving a group takes it out of their additional groups. If it is their primary group,
-  which a member cannot be without, it is swapped for the group they now belong in - the
-  reserve members group for a member of your unit gone to the reserve, the retired members
-  group for one who has retired, the unit members group for one back from the reserve, the 501st members group for one gone to another unit - or for
-  Registered when they belong in none. A squad's group is never the one made primary in
-  its place.
-- If the group taken away was the one shown beside their name, MyBB goes back to showing
-  their primary group.
+- Leaving a group removes it from their additional groups. If it is their primary group, it
+  is replaced with the group they now belong in - the reserve members group for a member of
+  your unit gone to the reserve, the retired members group for one who has retired, the unit
+  members group for one back from the reserve, the 501st members group for one gone to
+  another unit - or with Registered if they belong in none. A squad's group is never made
+  primary.
+- If the removed group was their display group, MyBB shows their primary group instead.
 
-The change is worked out again when you press Fix, from the member's groups as they are at
-that moment, so it is never one the page showed before somebody else changed them. Every fix
-is written to the administrator log.
+The change is worked out again from the member's current groups when you press Fix. Every
+fix is written to the administrator log.
 
 ## Who can use it
 
@@ -209,10 +171,8 @@ Administrators with "Can manage users?" under Admin Permissions -> Users & Group
 
 ## Checking against the 501st
 
-Answers from the API are kept for 15 minutes, so fixing members one by one does not ask the
-API about everybody again after each. **Check Again** forgets them, but not the answers to
-email address lookups, which take hours to ask again (see above). An answer the API could not
-give is never kept, so it is asked for again next time.
+Answers from the API are kept for 15 minutes. **Check Again** clears them, except the
+answers to email address lookups. An answer the API could not give is never kept.
 
 ## Database tables
 
@@ -222,9 +182,6 @@ give is never kept, so it is asked for again next time.
 | `access_audit_email_lookups`    | The API's answers to email address lookups, by a hash of the address - never the address itself |
 | `access_audit_found_legion_ids` | The Legion IDs the email address lookups have saved to members' profiles                        |
 | `access_audit_schema_upgrades`  | Which schema upgrades the board has had                                                         |
-
-Upgrading to the release with squads forgets the answers kept so far, so the first audit
-afterwards asks the API about everybody again.
 
 ## License
 

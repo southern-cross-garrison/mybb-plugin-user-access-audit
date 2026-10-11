@@ -84,7 +84,7 @@ test('saves the Legion ID found for a member, and the audit then judges them by 
 
 	await openLegionIds(page);
 	await expect(page.locator('#access_audit_lookup_members')).toHaveText('3');
-	await expect(page.locator('#access_audit_lookup_due')).toHaveText('3');
+	await expect(page.locator('#access_audit_lookup_never')).toHaveText('3');
 	await expect(page.locator('#access_audit_lookup_allowance')).toHaveText('50 of 50');
 	await expect(page.locator('#access_audit_found_empty')).toBeVisible();
 
@@ -100,7 +100,7 @@ test('saves the Legion ID found for a member, and the audit then judges them by 
 		displaygroup: 0,
 	});
 
-	await expect(page.locator('#access_audit_lookup_due')).toHaveText('0');
+	await expect(page.locator('#access_audit_lookup_never')).toHaveText('0');
 	await expect(page.locator('#access_audit_lookup_no_match')).toHaveText('2');
 	await expect(page.locator('#access_audit_lookup_found')).toHaveText('1');
 	await expect(page.locator('#access_audit_lookup_allowance')).toHaveText('47 of 50');
@@ -173,7 +173,9 @@ test('saves a Legion ID for a member with no profile fields row at all', async (
 	expect(await getLegionId('guestmember')).toBe('20003');
 });
 
-test('does not save again a Legion ID somebody has taken off the profile', async ({ page }) => {
+test('does not save again, or ask about, a Legion ID somebody has taken off the profile', async ({
+	page,
+}) => {
 	await forgetEmailLookups();
 	stubEmail(GUEST_EMAIL, emailMatch(20003));
 	await lookUpBatch(page);
@@ -183,8 +185,41 @@ test('does not save again a Legion ID somebody has taken off the profile', async
 	await ageEmailLookups(8 * DAY);
 	await lookUpBatch(page);
 
-	expect(emailRequests().filter((request) => request === `/email/${GUEST_EMAIL}`)).toHaveLength(2);
+	expect(emailRequests().filter((request) => request === `/email/${GUEST_EMAIL}`)).toHaveLength(1);
 	expect(await getLegionId('guestmember')).toBe('');
+	await expect(page.locator('#access_audit_lookup_unsaved')).toHaveCount(0);
+
+	// Taken off on purpose, so the audit judges them as having none rather than waiting.
+	await openAudit(page, { all: true });
+	await expect(row(page, 'guestmember').locator('.access-audit-record')).toHaveText(
+		'No Legion ID on their profile'
+	);
+});
+
+test('saves a Legion ID found by an earlier lookup without asking again', async ({ page }) => {
+	await forgetEmailLookups();
+	// As a release that left saving it to the audit's Fix kept it.
+	await execute(
+		`INSERT INTO ${T('access_audit_email_lookups')} (email_hash, legion_id, fetched_at) VALUES (SHA1(?), 20003, UNIX_TIMESTAMP() - 3600)`,
+		[GUEST_EMAIL]
+	);
+	await spendAllowance(50);
+
+	// The audit's waiting members are the tab's not looked up yet and found, not saved.
+	await openAudit(page);
+	await expect(page.locator('#access_audit_count_waiting')).toHaveText('3');
+	await openLegionIds(page);
+	await expect(page.locator('#access_audit_lookup_never')).toHaveText('2');
+	await expect(page.locator('#access_audit_lookup_unsaved')).toHaveText('1');
+
+	await page.locator('#access_audit_lookup_now').click();
+	await expect(flash(page)).toHaveText(
+		"Saved 1 Legion IDs found by earlier lookups. Nothing looked up: the 501st Legion API's limit has no room until the last batch is 15 minutes old. 2 still to look up."
+	);
+	expect(emailRequests()).toEqual([]);
+	expect(await getLegionId('guestmember')).toBe('20003');
+	await expect(page.locator('#access_audit_lookup_unsaved')).toHaveCount(0);
+	await expect(page.locator(`#access_audit_found_${uid('guestmember')}`)).toBeVisible();
 });
 
 test("keeps to the API's allowance of lookups", async ({ page }) => {
@@ -211,7 +246,7 @@ test("keeps to the API's allowance of lookups", async ({ page }) => {
 	await ageEmailLookups(901);
 	await lookUpBatch(page);
 	expect(emailRequests()).toHaveLength(3);
-	await expect(page.locator('#access_audit_lookup_due')).toHaveText('0');
+	await expect(page.locator('#access_audit_lookup_never')).toHaveText('0');
 });
 
 test('stops, and keeps nothing, when the API turns lookups away', async ({ page }) => {
@@ -229,7 +264,7 @@ test('stops, and keeps nothing, when the API turns lookups away', async ({ page 
 		'The 501st Legion API turned lookups away for asking too often'
 	);
 	expect(await query(`SELECT * FROM ${T('access_audit_email_lookups')}`)).toEqual([]);
-	await expect(page.locator('#access_audit_lookup_due')).toHaveText('3');
+	await expect(page.locator('#access_audit_lookup_never')).toHaveText('3');
 });
 
 const unusable: Array<[string, Parameters<typeof stubEmail>[1] | null]> = [
@@ -262,12 +297,17 @@ for (const [answer, response] of unusable) {
 
 test('looks an address nobody has up again after a week', async ({ page }) => {
 	await openLegionIds(page);
-	await expect(page.locator('#access_audit_lookup_due')).toHaveText('0');
+	await expect(page.locator('#access_audit_lookup_never')).toHaveText('0');
+	await expect(page.locator('#access_audit_lookup_recheck')).toHaveCount(0);
 	await expect(page.locator('#access_audit_lookup_no_match')).toHaveText('3');
 
 	await ageEmailLookups(7 * DAY);
 	await openLegionIds(page);
-	await expect(page.locator('#access_audit_lookup_due')).toHaveText('3');
+	await expect(page.locator('#access_audit_lookup_recheck')).toHaveText('3');
+	await expect(page.locator('#access_audit_lookup_no_match')).toHaveText('0');
+	// Still judged by the answer they have until they are looked up again.
+	await openAudit(page);
+	await expect(page.locator('#access_audit_count_waiting')).toHaveCount(0);
 });
 
 test('runs as a scheduled task, logging what it did', async () => {

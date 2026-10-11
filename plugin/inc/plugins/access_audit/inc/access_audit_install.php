@@ -177,7 +177,7 @@ function access_audit_install_settings()
         $db->insert_query("settinggroups", array(
             "name"        => "access_audit",
             "title"       => $db->escape_string("Access Audit"),
-            "description" => $db->escape_string("Which unit and groups the access audit checks members against. Easiest set under Users & Groups -> Access Audit -> Settings."),
+            "description" => $db->escape_string("Which unit and groups the access audit checks members against. Set them under Users & Groups -> Access Audit -> Settings."),
             "disporder"   => 50,
             "isdefault"   => 0
         ));
@@ -204,7 +204,7 @@ function access_audit_install_settings()
         array(
             "name"        => "access_audit_unit_name",
             "title"       => "Unit Name",
-            "description" => "The unit's name, as the 501st's records had it when it was chosen. Kept so the audit can name it while the API is down.",
+            "description" => "The unit's name, as the 501st's records had it when it was chosen.",
             "optionscode" => "text",
             "value"       => "",
             "disporder"   => 3,

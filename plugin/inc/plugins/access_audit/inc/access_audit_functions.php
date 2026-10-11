@@ -431,6 +431,18 @@ function access_audit_evaluate(array $config, array $members)
 
     $kept_emails = access_audit_kept_emails($emails);
 
+    // Which members a Legion ID found by email was saved for once and taken off since.
+    $found_uids = array();
+    foreach($members as $member)
+    {
+        $email = access_audit_normalise_email($member['email']);
+        if($email !== '' && isset($kept_emails[$email]) && $kept_emails[$email]['legion_id'] > 0)
+        {
+            $found_uids[] = (int)$member['uid'];
+        }
+    }
+    $saved_before = access_audit_saved_legion_ids($found_uids);
+
     $records = access_audit_lookup_members($numbers);
 
     $results = array();
@@ -439,12 +451,20 @@ function access_audit_evaluate(array $config, array $members)
         $number = access_audit_legion_number($member['legion_id']);
         // Whether they have no Legion ID of their own and the lookups have yet to say that no
         // approved member has their email address. Found to be somebody's, it is still
-        // waiting to be saved to their profile - the lookups save it, not the audit.
+        // waiting to be saved to their profile - the lookups save it, not the audit - unless
+        // it was saved once and taken off since, on purpose.
         $email_waiting = false;
         if($number === 0 && !access_audit_is_banned($member, $groups))
         {
             $email = access_audit_normalise_email($member['email']);
-            $email_waiting = $email !== '' && (!isset($kept_emails[$email]) || $kept_emails[$email]['legion_id'] > 0);
+            if($email !== '' && !isset($kept_emails[$email]))
+            {
+                $email_waiting = true;
+            }
+            elseif($email !== '' && $kept_emails[$email]['legion_id'] > 0)
+            {
+                $email_waiting = !isset($saved_before[(int)$member['uid'] . ':' . $kept_emails[$email]['legion_id']]);
+            }
         }
         $record = $number > 0 && isset($records[$number]) ? $records[$number] : null;
 
@@ -686,6 +706,29 @@ function access_audit_plan(array $member, array $wanted, array $config)
         'primary_to'       => $new_primary,
         'changed'          => $changed,
     );
+}
+
+/**
+ * Which Legion IDs found by email have been saved to these members' profiles, ever.
+ *
+ * @param array $uids Of int
+ * @return array "uid:legion_id" => true
+ */
+function access_audit_saved_legion_ids(array $uids)
+{
+    global $db;
+
+    $saved = array();
+    foreach(array_chunk(array_values(array_unique(array_map('intval', $uids))), 500) as $chunk)
+    {
+        $query = $db->simple_select("access_audit_found_legion_ids", "uid, legion_id", "uid IN (" . implode(',', $chunk) . ")");
+        while($row = $db->fetch_array($query))
+        {
+            $saved[(int)$row['uid'] . ':' . (int)$row['legion_id']] = true;
+        }
+    }
+
+    return $saved;
 }
 
 /**

@@ -79,25 +79,73 @@ function access_audit_lookup_candidates(array $config)
 }
 
 /**
- * Whether an address is due to be looked up: never asked about, or not for a while (see
- * ACCESS_AUDIT_EMAIL_RECHECK).
+ * Whether an address is due to be looked up: never asked about, or found to be nobody's a
+ * while ago (see ACCESS_AUDIT_EMAIL_RECHECK). One found to be somebody's is never asked
+ * about again: its Legion ID is saved from the answer kept, or was taken off the profile on
+ * purpose (see access_audit_save_found()).
  *
  * @param array $candidate As access_audit_lookup_candidates()
  * @return bool
  */
 function access_audit_lookup_due(array $candidate)
 {
-    return $candidate['fetched_at'] === 0 || $candidate['fetched_at'] < TIME_NOW - ACCESS_AUDIT_EMAIL_RECHECK;
+    return $candidate['fetched_at'] === 0
+        || ($candidate['legion_id'] === 0 && $candidate['fetched_at'] < TIME_NOW - ACCESS_AUDIT_EMAIL_RECHECK);
 }
 
 /**
- * Look up one batch: as many of the addresses due as the API's limit has room for, never
- * asked about first, then the longest ago. Each Legion ID found is saved to the profile of
- * every member with that address, and noted (see access_audit_found_legion_ids()).
+ * Save a Legion ID found by email to the profile of each member with that address, and note
+ * it (see access_audit_found_legion_ids()).
  *
  * A Legion ID saved once and taken off the member's profile since is not saved again: it
  * was somebody's decision that it is not theirs - an address shared with a partner who is
  * the 501st member, say.
+ *
+ * @param array $members As access_audit_members()
+ * @param int $legion_id
+ * @param array $config As access_audit_config()
+ * @return int How many members it was saved for
+ */
+function access_audit_save_found(array $members, $legion_id, array $config)
+{
+    global $db;
+
+    $uids = array();
+    foreach($members as $member)
+    {
+        $uids[] = (int)$member['uid'];
+    }
+    $saved_before = access_audit_saved_legion_ids($uids);
+
+    $saved = 0;
+    foreach($members as $member)
+    {
+        if(isset($saved_before[(int)$member['uid'] . ':' . (int)$legion_id]))
+        {
+            continue;
+        }
+
+        if(access_audit_save_legion_id($member, $legion_id, $config))
+        {
+            $db->insert_query("access_audit_found_legion_ids", array(
+                'uid'       => (int)$member['uid'],
+                'legion_id' => (int)$legion_id,
+                'found_at'  => TIME_NOW,
+            ));
+            $saved++;
+        }
+    }
+
+    return $saved;
+}
+
+/**
+ * Look up one batch: as many of the addresses due as the API's limit has room for, never
+ * asked about first, then the longest ago. Each Legion ID found is saved (see
+ * access_audit_save_found()).
+ *
+ * First, though, any Legion ID already found and not saved is saved from the answer kept,
+ * which costs no lookup - one found by a release that left saving it to the audit's Fix.
  *
  * @param array $config As access_audit_config(), with nothing missing
  * @return array 'asked', 'saved', 'no_match', 'unanswered' (counts of addresses, but
@@ -106,11 +154,17 @@ function access_audit_lookup_due(array $candidate)
  */
 function access_audit_lookup_batch(array $config)
 {
-    global $db;
-
     $result = array('asked' => 0, 'saved' => 0, 'no_match' => 0, 'unanswered' => 0, 'limited' => false, 'remaining' => 0);
 
     $candidates = access_audit_lookup_candidates($config);
+    foreach($candidates as $candidate)
+    {
+        if($candidate['legion_id'] > 0)
+        {
+            $result['saved'] += access_audit_save_found($candidate['members'], $candidate['legion_id'], $config);
+        }
+    }
+
     $due = array();
     foreach($candidates as $email => $candidate)
     {
@@ -148,24 +202,7 @@ function access_audit_lookup_batch(array $config)
             continue;
         }
 
-        foreach($candidates[$email]['members'] as $member)
-        {
-            $uid = (int)$member['uid'];
-            if($db->fetch_field($db->simple_select("access_audit_found_legion_ids", "id", "uid = {$uid} AND legion_id = {$legion_id}", array('limit' => 1)), "id"))
-            {
-                continue;
-            }
-
-            if(access_audit_save_legion_id($member, $legion_id, $config))
-            {
-                $db->insert_query("access_audit_found_legion_ids", array(
-                    'uid'       => $uid,
-                    'legion_id' => $legion_id,
-                    'found_at'  => TIME_NOW,
-                ));
-                $result['saved']++;
-            }
-        }
+        $result['saved'] += access_audit_save_found($candidates[$email]['members'], $legion_id, $config);
     }
 
     return $result;
@@ -183,9 +220,13 @@ function access_audit_describe_batch(array $result)
 
     if($result['asked'] === 0)
     {
-        return $result['remaining'] > 0
+        $text = $result['remaining'] > 0
             ? $lang->sprintf($lang->access_audit_batch_no_room, my_number_format($result['remaining']))
             : $lang->access_audit_batch_done;
+
+        return $result['saved'] > 0
+            ? $lang->sprintf($lang->access_audit_batch_saved_kept, my_number_format($result['saved'])) . ' ' . $text
+            : $text;
     }
 
     $text = $lang->sprintf($lang->access_audit_batch_result,
@@ -205,36 +246,58 @@ function access_audit_describe_batch(array $result)
 /**
  * How far the lookups have got, for the Legion IDs tab. Counted in members, not addresses.
  *
+ * 'never' and 'unsaved' together are the members the audit has waiting.
+ *
  * @param array $config As access_audit_config()
  * @return array 'members' (with no Legion ID, and an address to look up), 'never' (not
- *               looked up yet), 'due' (to look up, those included), 'no_match',
- *               'batches' (how many batches the due addresses will take), 'found' (Legion
- *               IDs saved, ever), 'allowance' (lookups the limit has room for now) and
- *               'next_run' (Unix time; null when the task is disabled)
+ *               looked up yet), 'unsaved' (found, and saved on the next run), 'recheck'
+ *               (nobody's a while ago, due to be looked up again), 'no_match' (nobody's,
+ *               lately), 'due' ('never' and 'recheck'), 'batches' (how many batches those
+ *               will take), 'found' (Legion IDs saved, ever), 'allowance' (lookups the
+ *               limit has room for now) and 'next_run' (Unix time; null when the task is
+ *               disabled)
  */
 function access_audit_lookup_progress(array $config)
 {
     global $db;
 
-    $progress = array('members' => 0, 'never' => 0, 'due' => 0, 'no_match' => 0, 'batches' => 0, 'found' => 0, 'allowance' => 0, 'next_run' => null);
+    $progress = array('members' => 0, 'never' => 0, 'unsaved' => 0, 'recheck' => 0, 'no_match' => 0, 'due' => 0, 'batches' => 0, 'found' => 0, 'allowance' => 0, 'next_run' => null);
+
+    $candidates = access_audit_lookup_candidates($config);
+    $uids = array();
+    foreach($candidates as $candidate)
+    {
+        foreach($candidate['members'] as $member)
+        {
+            $uids[] = (int)$member['uid'];
+        }
+    }
+    $saved_before = access_audit_saved_legion_ids($uids);
 
     $due_addresses = 0;
-    foreach(access_audit_lookup_candidates($config) as $candidate)
+    foreach($candidates as $candidate)
     {
         $members = count($candidate['members']);
         $progress['members'] += $members;
-        if($candidate['fetched_at'] === 0)
-        {
-            $progress['never'] += $members;
-        }
         if(access_audit_lookup_due($candidate))
         {
+            $progress[$candidate['fetched_at'] === 0 ? 'never' : 'recheck'] += $members;
             $progress['due'] += $members;
             $due_addresses++;
         }
         elseif($candidate['legion_id'] === 0)
         {
             $progress['no_match'] += $members;
+        }
+        else
+        {
+            foreach($candidate['members'] as $member)
+            {
+                if(!isset($saved_before[(int)$member['uid'] . ':' . $candidate['legion_id']]))
+                {
+                    $progress['unsaved']++;
+                }
+            }
         }
     }
 
