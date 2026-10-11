@@ -7,18 +7,35 @@ import {
 	OTHER_UNIT,
 	OUR_UNIT,
 	OUTPOST,
+	OTHER_SQUAD,
+	SQUAD,
+	legionApiMember,
 	legionApiRequests,
+	squadsDown,
+	stubLegionApi,
 	stubFixtureMembers,
+	stubSquads,
 	stubUnits,
 	unitsDown,
+	unstubLegionApi,
 } from '../helpers/legion-api';
 
 /**
  * Users & Groups -> Access Audit -> Settings: the unit, picked from the 501st API's list;
- * the Legion ID profile field; and the three groups the audit manages.
+ * the Legion ID profile field; the three groups the audit manages; and the squads, each
+ * picked from the API's list with a group of its own.
  */
 const save = (page: import('@playwright/test').Page) =>
 	page.locator('#access_audit_save_settings').click();
+
+/**
+ * Take a squad row off. The squads offered are the unit's, so changing the unit means
+ * taking off the provisioned squad, which is this unit's.
+ */
+const clearSquad = async (page: import('@playwright/test').Page, row = 0) => {
+	await page.locator(`#squad_${row}`).selectOption('0');
+	await page.locator(`#squad_group_${row}`).selectOption('0');
+};
 
 test.beforeEach(async ({ page }) => {
 	await loginToAdminCp(page);
@@ -34,7 +51,15 @@ test("offers the 501st API's units, garrisons and outposts, by name", async ({ p
 		'Southern Cross Garrison',
 	]);
 	await expect(page.locator('#unit')).toHaveValue(String(OUR_UNIT.id));
-	expect(legionApiRequests()).toEqual(['/garrisons']);
+	const requests = legionApiRequests();
+	expect(requests.slice(0, 2)).toEqual(['/garrisons', '/squads']);
+	// Then the squad officers' records, which say which unit each squad is in.
+	expect(requests.slice(2).sort()).toEqual([
+		'/legionId/40001',
+		'/legionId/40002',
+		'/legionId/40003',
+		'/legionId/40004',
+	]);
 });
 
 test("offers the board's profile fields and groups", async ({ page }) => {
@@ -62,6 +87,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 	await gotoAuditSettings(page);
 
 	await page.locator('#unit').selectOption(String(OTHER_UNIT.id));
+	await clearSquad(page);
 	await page.locator('#legion_id_field').selectOption(String(fixtures().profileFields.costumes));
 	await page.locator('#unit_group').selectOption(String(fixtures().groups.command));
 	await page.locator('#reserve_group').selectOption(String(fixtures().groups.legion));
@@ -91,6 +117,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 test("trims the API's stray spaces from a unit's name", async ({ page }) => {
 	await gotoAuditSettings(page);
 	await page.locator('#unit').selectOption(String(OUTPOST.id));
+	await clearSquad(page);
 	await save(page);
 
 	expect(await getSetting('access_audit_unit_name')).toBe(OUTPOST.name);
@@ -200,25 +227,30 @@ test.describe('while the API is down', () => {
 test('forgets answers from the old API when the address changes', async ({ page }) => {
 	stubFixtureMembers();
 	await openAudit(page);
-	expect((await lookups()).length).toBeGreaterThan(0);
+	const members = (await lookups()).map((row) => Number(row.legion_id));
+	expect(members.length).toBeGreaterThan(0);
 
 	await gotoAuditSettings(page);
 	await page.locator('#api_url').fill('http://127.0.0.1/e2e-legion-api.php');
 	await save(page);
 
 	await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
-	expect(await lookups()).toEqual([]);
+	// The page it comes back to has asked the new API about the squad officers since.
+	const kept = (await lookups()).map((row) => Number(row.legion_id));
+	expect(kept.filter((legionId) => members.includes(legionId))).toEqual([]);
 });
 
 test('keeps answers when the address stays the same', async ({ page }) => {
 	stubFixtureMembers();
 	await openAudit(page);
-	const kept = (await lookups()).length;
+	const members = (await lookups()).map((row) => Number(row.legion_id));
 
 	await gotoAuditSettings(page);
 	await save(page);
 
-	expect(await lookups()).toHaveLength(kept);
+	expect((await lookups()).map((row) => Number(row.legion_id))).toEqual(
+		expect.arrayContaining(members)
+	);
 });
 
 test('counts a deleted profile field or group as not chosen', async ({ page }) => {
@@ -234,4 +266,232 @@ test('counts a deleted profile field or group as not chosen', async ({ page }) =
 		'Legion ID profile field',
 		'Unit members group',
 	]);
+});
+
+test.describe('squads', () => {
+	const squads = async () => JSON.parse((await getSetting('access_audit_squads')) || '[]');
+
+	test("offers the unit's own squads by name, with the board's chosen and spare rows", async ({
+		page,
+	}) => {
+		await gotoAuditSettings(page);
+
+		// Not Snowy Range Squad, whose officer is in another unit.
+		await expect(page.locator('#squad_0 option')).toHaveText([
+			'Choose...',
+			'Hunter Valley Squad',
+			'Illawarra Squad',
+		]);
+		await expect(page.locator('#squad_0')).toHaveValue(String(SQUAD.id));
+		await expect(page.locator('#squad_group_0')).toHaveValue(String(fixtures().groups.squad));
+		await expect(page.locator('tr.access-audit-squad-row')).toHaveCount(4);
+		for (const spare of [1, 2, 3]) {
+			await expect(page.locator(`#squad_${spare}`)).toHaveValue('0');
+			await expect(page.locator(`#squad_group_${spare}`)).toHaveValue('0');
+		}
+	});
+
+	test('adds a squad, keeping its name, and the audit goes by it', async ({ page }) => {
+		await gotoAuditSettings(page);
+		await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
+		await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+		await save(page);
+
+		await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
+		expect(await squads()).toEqual([
+			{ squad: SQUAD.id, name: SQUAD.name, group: fixtures().groups.squad },
+			// Trimmed of the API's stray space.
+			{ squad: OTHER_SQUAD.id, name: OTHER_SQUAD.name, group: fixtures().groups.otherSquad },
+		]);
+		await expect(page.locator('tr.access-audit-squad-row')).toHaveCount(5);
+
+		await openAudit(page);
+		await expect(page.locator('#access_audit_rules')).toContainText(
+			'Active members of Illawarra Squad belong in Illawarra Squad Members as well.'
+		);
+	});
+
+	test('takes a squad off when it is set back to Choose...', async ({ page }) => {
+		await gotoAuditSettings(page);
+		await page.locator('#squad_0').selectOption('0');
+		await page.locator('#squad_group_0').selectOption('0');
+		await save(page);
+
+		await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
+		expect(await getSetting('access_audit_squads')).toBe('');
+	});
+
+	test('moves a squad to another group', async ({ page }) => {
+		await gotoAuditSettings(page);
+		await page.locator('#squad_group_0').selectOption(String(fixtures().groups.otherSquad));
+		await save(page);
+
+		expect(await squads()).toEqual([
+			{ squad: SQUAD.id, name: SQUAD.name, group: fixtures().groups.otherSquad },
+		]);
+	});
+
+	const refusals: [string, string, (page: import('@playwright/test').Page) => Promise<void>][] = [
+		[
+			'a squad without a group',
+			'Choose both a squad and its group, or neither.',
+			async (page) => {
+				await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
+			},
+		],
+		[
+			'a group without a squad',
+			'Choose both a squad and its group, or neither.',
+			async (page) => {
+				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+			},
+		],
+		[
+			'the same squad twice',
+			'Each squad can only be chosen once.',
+			async (page) => {
+				await page.locator('#squad_1').selectOption(String(SQUAD.id));
+				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+			},
+		],
+		[
+			"one of the other three groups as a squad's",
+			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members and 501st members groups.",
+			async (page) => {
+				await page.locator('#squad_group_0').selectOption(String(fixtures().groups.legion));
+			},
+		],
+		[
+			'two squads in one group',
+			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members and 501st members groups.",
+			async (page) => {
+				await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
+				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.squad));
+			},
+		],
+		[
+			"another unit's squad",
+			"Choose squads of this board's unit. If the unit has just been changed, take its old squads off first.",
+			async (page) => {
+				await page.locator('#squad_1').evaluate((select: HTMLSelectElement) => {
+					select.add(new Option('Snowy Range Squad', '102'));
+					select.value = '102';
+				});
+				await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+			},
+		],
+	];
+	for (const [what, message, choose] of refusals) {
+		test(`will not save ${what}`, async ({ page }) => {
+			const before = await getSetting('access_audit_squads');
+			await gotoAuditSettings(page);
+			await choose(page);
+			await save(page);
+
+			await expect(page.locator('.error')).toContainText(message);
+			expect(await getSetting('access_audit_squads')).toBe(before);
+		});
+	}
+
+	test('keeps what was chosen in each row when the form comes back with an error', async ({
+		page,
+	}) => {
+		await gotoAuditSettings(page);
+		await page.locator('#squad_2').selectOption(String(OTHER_SQUAD.id));
+		await save(page);
+
+		await expect(page.locator('.error')).toContainText(
+			'Choose both a squad and its group, or neither.'
+		);
+		// The spare row left empty is gone, and the half-chosen one is kept.
+		await expect(page.locator('#squad_0')).toHaveValue(String(SQUAD.id));
+		await expect(page.locator('#squad_1')).toHaveValue(String(OTHER_SQUAD.id));
+		await expect(page.locator('#squad_group_1')).toHaveValue('0');
+	});
+
+	test('passes over an officer whose record puts them in another squad', async ({ page }) => {
+		stubLegionApi(40001, legionApiMember(40001, { squad: OTHER_SQUAD }));
+		await gotoAuditSettings(page);
+
+		// Hunter Valley Squad's only officer cannot place it.
+		await expect(page.locator('#squad_1 option')).toHaveText(['Choose...', 'Illawarra Squad']);
+	});
+
+	test("offers a new unit's squads once it is saved, and will not keep the old unit's", async ({
+		page,
+	}) => {
+		await gotoAuditSettings(page);
+		await page.locator('#unit').selectOption(String(OTHER_UNIT.id));
+		await save(page);
+
+		await expect(page.locator('.error')).toContainText(
+			"Choose squads of this board's unit. If the unit has just been changed, take its old squads off first."
+		);
+		expect(await getSetting('access_audit_unit')).toBe(String(OUR_UNIT.id));
+
+		await clearSquad(page);
+		await save(page);
+
+		await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
+		await expect(page.locator('#squad_0 option')).toHaveText(['Choose...', 'Snowy Range Squad']);
+	});
+
+	test('says when the unit has no squads', async ({ page }) => {
+		await gotoAuditSettings(page);
+		await page.locator('#unit').selectOption(String(OUTPOST.id));
+		await clearSquad(page);
+		await save(page);
+
+		await expect(page.locator('#access_audit_squads_none')).toHaveText(
+			"The 501st's records show no squads in this unit."
+		);
+		await expect(page.locator('#squad_0 option')).toHaveText(['Choose...']);
+	});
+
+	test.describe('while the API is down', () => {
+		test('says so when it cannot answer for an officer, rather than leave their squad out', async ({
+			page,
+		}) => {
+			unstubLegionApi(40003);
+			await gotoAuditSettings(page);
+
+			await expect(page.locator('#access_audit_squads_unavailable')).toBeVisible();
+			await expect(page.locator('#squad_0 option')).toHaveText(['Choose...', SQUAD.name]);
+		});
+
+		test('says so, and still offers and saves the squads already chosen', async ({ page }) => {
+			squadsDown();
+			await gotoAuditSettings(page);
+
+			await expect(page.locator('#access_audit_squads_unavailable')).toBeVisible();
+			await expect(page.locator('#squad_0 option')).toHaveText(['Choose...', SQUAD.name]);
+			await page.locator('#squad_group_0').selectOption(String(fixtures().groups.otherSquad));
+			await save(page);
+
+			await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
+			expect(await squads()).toEqual([
+				{ squad: SQUAD.id, name: SQUAD.name, group: fixtures().groups.otherSquad },
+			]);
+		});
+
+		test('cannot add a squad', async ({ page }) => {
+			await gotoAuditSettings(page);
+			squadsDown();
+			await page.locator('#squad_1').selectOption(String(OTHER_SQUAD.id));
+			await page.locator('#squad_group_1').selectOption(String(fixtures().groups.otherSquad));
+			await save(page);
+
+			await expect(page.locator('.error')).toContainText(
+				'The list of squads could not be fetched from the 501st Legion API, so squads cannot be added right now.'
+			);
+			expect(await squads()).toHaveLength(1);
+		});
+
+		test('treats a list with nothing usable in it as no list', async ({ page }) => {
+			stubSquads({ body: { squad: [{ name: 'No id' }, 'nonsense'] } });
+			await gotoAuditSettings(page);
+
+			await expect(page.locator('#access_audit_squads_unavailable')).toBeVisible();
+		});
+	});
 });

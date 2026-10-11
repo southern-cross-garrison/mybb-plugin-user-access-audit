@@ -1,11 +1,13 @@
 <?php
 /**
- * A stand-in for the 501st Legion API's /garrisons and /legionId/{id}, for the e2e suite.
+ * A stand-in for the 501st Legion API's /garrisons, /squads and /legionId/{id}, for the e2e
+ * suite.
  *
  * Global setup copies this to the forum root, and provisioning points the
  * access_audit_api_url setting at it, so no test ever reaches the real API. A test says
  * what the API answers by writing a file into e2e-legion-api/ beside it
- * (tests/helpers/legion-api.ts): garrisons.json for the list of units, <id>.json for one
+ * (tests/helpers/legion-api.ts): garrisons.json for the list of units, squads.json for the
+ * list of squads, <id>.json for one
  * Legion ID, each {"status": 200, "body": {...}} or {"raw": "..."}. Anything with no file
  * answers 503, the API being down. Every request is appended to
  * e2e-legion-api/requests.log.
@@ -22,6 +24,10 @@ $file = null;
 if($path === '/garrisons')
 {
     $file = $dir . '/garrisons.json';
+}
+elseif($path === '/squads')
+{
+    $file = $dir . '/squads.json';
 }
 elseif(preg_match('#^/legionId/(\d+)$#', $path, $match))
 {

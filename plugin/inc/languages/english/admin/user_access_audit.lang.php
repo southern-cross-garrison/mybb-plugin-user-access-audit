@@ -6,9 +6,9 @@
 $l['access_audit'] = "Access Audit";
 
 $l['access_audit_tab_audit'] = "Audit";
-$l['access_audit_tab_audit_desc'] = "Every member's groups checked against their 501st Legion record. Only the unit members, reserve members and 501st members groups are ever changed; any other group a member is in is left alone.";
+$l['access_audit_tab_audit_desc'] = "Every member's groups checked against their 501st Legion record. Only the unit members, reserve members and 501st members groups, and the squads' groups, are ever changed; any other group a member is in is left alone.";
 $l['access_audit_tab_settings'] = "Settings";
-$l['access_audit_tab_settings_desc'] = "Which unit this board belongs to, where members' Legion IDs are kept, and which groups the audit manages.";
+$l['access_audit_tab_settings_desc'] = "Which unit this board belongs to, where members' Legion IDs are kept, and which squads and groups the audit manages.";
 
 // Settings.
 $l['access_audit_choose'] = "Choose...";
@@ -27,6 +27,15 @@ $l['access_audit_setting_legion_group_desc'] = "Every Active or Reserve 501st me
 $l['access_audit_setting_same_group'] = "The unit members, reserve members and 501st members groups must be three different groups";
 $l['access_audit_save_settings'] = "Save Settings";
 $l['access_audit_settings_saved'] = "The settings have been saved.";
+$l['access_audit_squads'] = "Squads";
+$l['access_audit_squads_desc'] = "Active members of each squad chosen here belong in its group as well, and nobody else does - on top of the groups above. Reserve members do not. The squads offered are the unit's own, as saved above. Choose a squad and its group in an empty row to add one, and set a squad back to Choose... to stop auditing it.";
+$l['access_audit_squads_no_unit'] = "Choose this board's unit and save to be offered its squads.";
+$l['access_audit_squads_none'] = "The 501st's records show no squads in this unit.";
+$l['access_audit_col_squad'] = "Squad";
+$l['access_audit_col_squad_group'] = "Its group";
+$l['access_audit_squads_unavailable'] = "The list of squads could not be fetched from the 501st Legion API. The squads already chosen can still be kept, changed or taken off.";
+$l['access_audit_setting_squads'] = "Squads - one of their groups no longer exists, or the setting cannot be read";
+$l['access_audit_setting_squad_same_group'] = "Each squad's group must be a group of its own, not another squad's or one of the other three";
 $l['access_audit_units_unavailable'] = "The list of units could not be fetched from the 501st Legion API. Check its address, or try again later.";
 
 $l['access_audit_error_api_url'] = "Enter the 501st Legion API's address, starting with http:// or https://.";
@@ -37,12 +46,19 @@ $l['access_audit_error_unit_group'] = "Choose the unit members group.";
 $l['access_audit_error_reserve_group'] = "Choose the reserve members group.";
 $l['access_audit_error_legion_group'] = "Choose the 501st members group.";
 $l['access_audit_error_same_group'] = "The unit members, reserve members and 501st members groups must be three different groups.";
+$l['access_audit_error_squad_incomplete'] = "Choose both a squad and its group, or neither.";
+$l['access_audit_error_squad'] = "Choose squads of this board's unit. If the unit has just been changed, take its old squads off first.";
+$l['access_audit_error_squads_unavailable'] = "The list of squads could not be fetched from the 501st Legion API, so squads cannot be added right now.";
+$l['access_audit_error_squad_group'] = "Choose a group for each squad.";
+$l['access_audit_error_same_squad'] = "Each squad can only be chosen once.";
+$l['access_audit_error_squad_same_group'] = "Each squad needs a group of its own, not another squad's or one of the unit members, reserve members and 501st members groups.";
 
 // The audit.
 $l['access_audit_not_configured'] = "The audit cannot run until it has been set up on the <a href=\"{1}\">Settings</a> tab. Still needed:";
 $l['access_audit_not_configured_short'] = "The audit has not been set up yet.";
 $l['access_audit_summary'] = "Summary";
 $l['access_audit_summary_rules'] = "Active members of <strong>{1}</strong> belong in both <strong>{2}</strong> and <strong>{3}</strong>, and its Reserve members in both <strong>{4}</strong> and <strong>{3}</strong>. Active and Reserve members of any other unit belong in <strong>{3}</strong> only. Anybody else - no Legion ID, any other status, or no public 501st record - belongs in none of them.";
+$l['access_audit_summary_squad'] = "Active members of <strong>{1}</strong> belong in <strong>{2}</strong> as well.";
 $l['access_audit_count_checked'] = "Members checked";
 $l['access_audit_count_ok'] = "Groups correct";
 $l['access_audit_count_fix'] = "Groups need changing";

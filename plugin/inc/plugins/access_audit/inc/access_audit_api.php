@@ -2,9 +2,11 @@
 /**
  * MyBB Access Audit Plugin - The 501st Legion's API
  *
- * Two calls: /garrisons, the list of units (garrisons and outposts) the Settings tab picks
- * from, and /legionId/{id}, one member's record. The record is what the audit judges a
- * member by: memberStatus, and garrisonId for which unit they belong to.
+ * Three calls: /garrisons and /squads, the lists of units (garrisons and outposts) and of
+ * squads the Settings tab picks from, and /legionId/{id}, one member's record. The record
+ * is what the audit judges a member by: memberStatus, garrisonId for which unit they belong
+ * to, and squadId for which squad, if any. The list of squads does not say which unit each
+ * is in, so that comes from their officers' records (see access_audit_api_squads()).
  *
  * The API answers a member who has made their record private and an ID nobody holds the
  * same way: 200, with nothing but {"memberStatus": "Classified Record"}. Members who have
@@ -126,6 +128,28 @@ function access_audit_api_decode($body, $status)
 }
 
 /**
+ * One GET of the API, decoded.
+ *
+ * @param string $base As access_audit_api_base()
+ * @param string $path From the base, starting with a slash
+ * @return array|null As access_audit_api_decode(); null when the base is not usable either
+ */
+function access_audit_api_get($base, $path)
+{
+    if($base === '' || !access_audit_valid_api_url($base) || !function_exists('curl_init'))
+    {
+        return null;
+    }
+
+    $ch = access_audit_api_handle($base . $path);
+    $body = curl_exec($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    access_audit_api_close($ch);
+
+    return access_audit_api_decode($body, $status);
+}
+
+/**
  * The 501st's units: every garrison and outpost, sorted by name.
  *
  * @param string|null $base As access_audit_api_base()
@@ -134,18 +158,7 @@ function access_audit_api_decode($body, $status)
  */
 function access_audit_api_units($base = null)
 {
-    $base = access_audit_api_base($base);
-    if($base === '' || !access_audit_valid_api_url($base) || !function_exists('curl_init'))
-    {
-        return null;
-    }
-
-    $ch = access_audit_api_handle($base . '/garrisons');
-    $body = curl_exec($ch);
-    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    access_audit_api_close($ch);
-
-    $data = access_audit_api_decode($body, $status);
+    $data = access_audit_api_get(access_audit_api_base($base), '/garrisons');
     if($data === null || !isset($data['garrisons']) || !is_array($data['garrisons']))
     {
         return null;
@@ -185,10 +198,115 @@ function access_audit_api_units($base = null)
 }
 
 /**
+ * The squads of one unit, sorted by name.
+ *
+ * /squads lists every squad in the Legion and says nothing of which unit each belongs to,
+ * and no call answers that directly. What each squad does list is its officers, and an
+ * officer's own record names their garrison - and their squad, which is checked, so an
+ * officer whose record puts them somewhere else is passed over for the next one. That is a
+ * record per squad, so they go through the lookups table like members' do.
+ *
+ * @param int $unit
+ * @param string|null $base As access_audit_api_base()
+ * @return array|null squad id => name; null when the API gave no usable answer, or did not
+ *                    answer for an officer, since a squad left out for that would look
+ *                    like a squad the unit does not have. A squad none of whose officers
+ *                    has a public record cannot be placed, and is left out.
+ */
+function access_audit_api_squads($unit, $base = null)
+{
+    $base = access_audit_api_base($base);
+    $data = access_audit_api_get($base, '/squads');
+    if($data === null || !isset($data['squad']) || !is_array($data['squad']))
+    {
+        return null;
+    }
+
+    $squads = array();
+    foreach($data['squad'] as $squad)
+    {
+        if(!is_array($squad) || !isset($squad['squadId'], $squad['name']) || !is_numeric($squad['squadId']) || !is_string($squad['name']))
+        {
+            continue;
+        }
+
+        $name = trim(preg_replace('/\s+/u', ' ', $squad['name']));
+        if($name === '' || (int)$squad['squadId'] <= 0)
+        {
+            continue;
+        }
+
+        $officers = array();
+        foreach(isset($squad['officers']) && is_array($squad['officers']) ? $squad['officers'] : array() as $officer)
+        {
+            if(is_array($officer) && isset($officer['legionId']) && is_numeric($officer['legionId']) && (int)$officer['legionId'] > 0)
+            {
+                $officers[] = (int)$officer['legionId'];
+            }
+        }
+
+        $squads[(int)$squad['squadId']] = array('name' => $name, 'officers' => array_values(array_unique($officers)));
+    }
+
+    if(!$squads)
+    {
+        return null;
+    }
+
+    // Each squad's first officer, then the next for any squad that could not be placed by
+    // the first, and so on. Almost every squad is placed by the first.
+    $units = array();
+    for($round = 0; ; $round++)
+    {
+        $asking = array();
+        foreach($squads as $id => $squad)
+        {
+            if(!isset($units[$id]) && isset($squad['officers'][$round]))
+            {
+                $asking[$id] = $squad['officers'][$round];
+            }
+        }
+        if(!$asking)
+        {
+            break;
+        }
+
+        $records = access_audit_lookup_members(array_values($asking), $base);
+        foreach($asking as $id => $legion_id)
+        {
+            if(!isset($records[$legion_id]))
+            {
+                return null;
+            }
+
+            $record = $records[$legion_id];
+            if($record['garrison_id'] > 0 && $record['squad_id'] === $id)
+            {
+                $units[$id] = $record['garrison_id'];
+            }
+        }
+    }
+
+    $names = array();
+    foreach($squads as $id => $squad)
+    {
+        if(isset($units[$id]) && $units[$id] === (int)$unit)
+        {
+            $names[$id] = $squad['name'];
+        }
+    }
+
+    uasort($names, 'strnatcasecmp');
+
+    return $names;
+}
+
+/**
  * One member's record, as the audit needs it, from a decoded /legionId/{id} response.
  *
  * @param array $data
- * @return array 'status', 'garrison_id', 'garrison_name', 'name'
+ * @return array 'status', 'garrison_id', 'garrison_name', 'squad_id' (0 for none),
+ *               'squad_name' and 'name'
  */
 function access_audit_api_parse_member(array $data)
 {
@@ -202,14 +320,22 @@ function access_audit_api_parse_member(array $data)
             'status'        => ACCESS_AUDIT_CLASSIFIED,
             'garrison_id'   => 0,
             'garrison_name' => '',
+            'squad_id'      => 0,
+            'squad_name'    => '',
             'name'          => '',
         );
     }
+
+    // A member in no squad comes back as squadId "" and squadName "No Squad"; one in a
+    // squad has its id as a string of digits.
+    $squad_id = isset($data['squadId']) && is_numeric($data['squadId']) ? max(0, (int)$data['squadId']) : 0;
 
     return array(
         'status'        => $status !== '' ? my_substr($status, 0, 50) : 'Unknown',
         'garrison_id'   => isset($data['garrisonId']) && is_numeric($data['garrisonId']) ? (int)$data['garrisonId'] : 0,
         'garrison_name' => isset($data['garrisonName']) && is_string($data['garrisonName']) ? my_substr(trim($data['garrisonName']), 0, 255) : '',
+        'squad_id'      => $squad_id,
+        'squad_name'    => $squad_id > 0 && isset($data['squadName']) && is_string($data['squadName']) ? my_substr(trim($data['squadName']), 0, 255) : '',
         'name'          => my_substr(trim(preg_replace('/\s+/u', ' ', $data['fullName'])), 0, 255),
     );
 }
@@ -218,12 +344,13 @@ function access_audit_api_parse_member(array $data)
  * Fetch member records from the API, several at a time.
  *
  * @param array $legion_ids Of int
+ * @param string|null $base As access_audit_api_base()
  * @return array legion id => record (as access_audit_api_parse_member()), for the IDs the
  *               API answered; an ID it did not answer is missing
  */
-function access_audit_api_fetch_members(array $legion_ids)
+function access_audit_api_fetch_members(array $legion_ids, $base = null)
 {
-    $base = access_audit_api_base();
+    $base = access_audit_api_base($base);
     if($base === '' || !access_audit_valid_api_url($base) || !function_exists('curl_multi_init') || !$legion_ids)
     {
         return array();
@@ -301,9 +428,12 @@ function access_audit_api_fetch_members(array $legion_ids)
  * recently, otherwise from the API, keeping what it answers.
  *
  * @param array $legion_ids Of int
+ * @param string|null $base As access_audit_api_base(). The table holds the saved API's
+ *                          answers only, so another API - the Settings tab trying an
+ *                          address before it is saved - is asked directly, and nothing kept.
  * @return array legion id => record; an ID neither had is missing
  */
-function access_audit_lookup_members(array $legion_ids)
+function access_audit_lookup_members(array $legion_ids, $base = null)
 {
     global $db;
 
@@ -311,6 +441,13 @@ function access_audit_lookup_members(array $legion_ids)
     if(!$legion_ids)
     {
         return array();
+    }
+
+    if($base !== null && access_audit_api_base($base) !== access_audit_api_base())
+    {
+        @set_time_limit(0);
+
+        return access_audit_api_fetch_members($legion_ids, $base);
     }
 
     $records = array();
@@ -326,6 +463,8 @@ function access_audit_lookup_members(array $legion_ids)
                 'status'        => $row['member_status'],
                 'garrison_id'   => (int)$row['garrison_id'],
                 'garrison_name' => $row['garrison_name'],
+                'squad_id'      => (int)$row['squad_id'],
+                'squad_name'    => $row['squad_name'],
                 'name'          => $row['full_name'],
             );
         }
@@ -348,6 +487,8 @@ function access_audit_lookup_members(array $legion_ids)
             'member_status' => $db->escape_string($record['status']),
             'garrison_id'   => (int)$record['garrison_id'],
             'garrison_name' => $db->escape_string($record['garrison_name']),
+            'squad_id'      => (int)$record['squad_id'],
+            'squad_name'    => $db->escape_string($record['squad_name']),
             'full_name'     => $db->escape_string($record['name']),
             'fetched_at'    => TIME_NOW,
         ));

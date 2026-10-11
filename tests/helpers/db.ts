@@ -53,7 +53,14 @@ export const T = (name: string) => `${TABLE_PREFIX}${name}`;
 
 export interface Fixtures {
 	password: string;
-	groups: { unit: number; legion: number; reserve: number; command: number };
+	groups: {
+		unit: number;
+		legion: number;
+		reserve: number;
+		command: number;
+		squad: number;
+		otherSquad: number;
+	};
 	profileFields: { legion_id: number; costumes: number };
 	users: Record<string, number>;
 }

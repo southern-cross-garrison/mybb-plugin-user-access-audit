@@ -12,8 +12,11 @@
  *   501st members as much as anybody;
  * - Reserve, in this unit: in the reserve members group and the 501st members group.
  *
- * Only those three groups are ever changed. Every other group a member is in - command
- * staff, moderators, administrators - is left exactly as it is.
+ * On top of that, an Active member of one of the squads chosen in the settings is in that
+ * squad's group, and nobody else is.
+ *
+ * Only those groups are ever changed. Every other group a member is in - command staff,
+ * moderators, administrators - is left exactly as it is.
  */
 
 if(!defined("IN_MYBB"))
@@ -86,10 +89,93 @@ function access_audit_legion_number($legion_id)
 }
 
 /**
+ * The squads setting: a JSON list of {"squad": id, "name": name, "group": gid}, in the
+ * order they were chosen. The name is the squad's as the 501st's records had it when it
+ * was chosen, kept so the audit can name it while the API is down.
+ *
+ * @param string $value
+ * @return array|null Of array('squad' => int, 'name' => string, 'group' => int); null when
+ *                    the value is not such a list, or names a squad twice
+ */
+function access_audit_parse_squads($value)
+{
+    $value = trim((string)$value);
+    if($value === '')
+    {
+        return array();
+    }
+
+    $data = json_decode($value, true);
+    if(!is_array($data))
+    {
+        return null;
+    }
+
+    $squads = array();
+    foreach($data as $entry)
+    {
+        if(!is_array($entry) || !isset($entry['squad'], $entry['group']) || !is_numeric($entry['squad']) || !is_numeric($entry['group']))
+        {
+            return null;
+        }
+
+        $squad = (int)$entry['squad'];
+        if($squad <= 0 || (int)$entry['group'] <= 0 || isset($squads[$squad]))
+        {
+            return null;
+        }
+
+        $squads[$squad] = array(
+            'squad' => $squad,
+            'name'  => isset($entry['name']) && is_string($entry['name']) ? $entry['name'] : '',
+            'group' => (int)$entry['group'],
+        );
+    }
+
+    return array_values($squads);
+}
+
+/**
+ * The squads setting's value for a list of squads.
+ *
+ * @param array $squads As access_audit_parse_squads()
+ * @return string
+ */
+function access_audit_encode_squads(array $squads)
+{
+    if(!$squads)
+    {
+        return '';
+    }
+
+    $entries = array();
+    foreach($squads as $squad)
+    {
+        $entries[] = array('squad' => (int)$squad['squad'], 'name' => (string)$squad['name'], 'group' => (int)$squad['group']);
+    }
+
+    // Non-ASCII names stay escaped, so the value is plain ASCII whatever the board's
+    // character set.
+    return json_encode($entries);
+}
+
+/**
+ * A squad's name, or its id when no name was kept.
+ *
+ * @param array $squad As access_audit_parse_squads()
+ * @return string
+ */
+function access_audit_squad_name(array $squad)
+{
+    return $squad['name'] !== '' ? $squad['name'] : '#' . (int)$squad['squad'];
+}
+
+/**
  * The audit's configuration, and what is missing from it.
  *
- * @return array 'unit', 'unit_name', 'field', 'unit_group', 'reserve_group', 'legion_group'
- *               and 'missing' (language keys for each setting that is not usable)
+ * @return array 'unit', 'unit_name', 'field', 'unit_group', 'reserve_group', 'legion_group',
+ *               'squads' (as access_audit_parse_squads(), empty when unusable) and 'missing'
+ *               (language keys for each setting that is not usable)
  */
 function access_audit_config()
 {
@@ -102,6 +188,7 @@ function access_audit_config()
         'unit_group'    => (int)access_audit_setting('unit_group'),
         'reserve_group' => (int)access_audit_setting('reserve_group'),
         'legion_group'  => (int)access_audit_setting('legion_group'),
+        'squads'        => access_audit_parse_squads(access_audit_setting('squads')),
         'missing'       => array(),
     );
 
@@ -135,9 +222,30 @@ function access_audit_config()
         }
     }
 
-    if(!access_audit_groups_distinct(array($config['unit_group'], $config['reserve_group'], $config['legion_group'])))
+    $core_groups = array($config['unit_group'], $config['reserve_group'], $config['legion_group']);
+    if(!access_audit_groups_distinct($core_groups))
     {
         $config['missing'][] = 'access_audit_setting_same_group';
+    }
+
+    // Squads are optional, but a list that cannot be read, or a squad whose group has been
+    // deleted, would quietly stop that squad being audited - so the audit says so instead.
+    $squads_usable = $config['squads'] !== null;
+    foreach((array)$config['squads'] as $squad)
+    {
+        if(!isset($groups[$squad['group']]))
+        {
+            $squads_usable = false;
+        }
+    }
+    if(!$squads_usable)
+    {
+        $config['missing'][] = 'access_audit_setting_squads';
+        $config['squads'] = array();
+    }
+    elseif(access_audit_groups_distinct($core_groups) && !access_audit_groups_distinct(access_audit_audited_groups($config)))
+    {
+        $config['missing'][] = 'access_audit_setting_squad_same_group';
     }
 
     return $config;
@@ -159,14 +267,40 @@ function access_audit_groups_distinct(array $gids)
 
 /**
  * The groups the audit manages, in the order their changes are described: the unit's own
- * two, then the 501st members group.
+ * two, then the 501st members group, then each squad's.
  *
  * @param array $config As access_audit_config()
  * @return array Of int
  */
 function access_audit_audited_groups(array $config)
 {
-    return array((int)$config['unit_group'], (int)$config['reserve_group'], (int)$config['legion_group']);
+    $gids = array((int)$config['unit_group'], (int)$config['reserve_group'], (int)$config['legion_group']);
+    foreach($config['squads'] as $squad)
+    {
+        $gids[] = (int)$squad['group'];
+    }
+
+    return $gids;
+}
+
+/**
+ * The group an Active member with this record belongs in for their squad, if any.
+ *
+ * @param array $config As access_audit_config()
+ * @param array $record As access_audit_api_parse_member()
+ * @return int 0 when their squad is not one the audit manages, or they are in none
+ */
+function access_audit_squad_group(array $config, array $record)
+{
+    foreach($config['squads'] as $squad)
+    {
+        if((int)$record['squad_id'] > 0 && (int)$record['squad_id'] === (int)$squad['squad'])
+        {
+            return (int)$squad['group'];
+        }
+    }
+
+    return 0;
 }
 
 /**
@@ -292,6 +426,17 @@ function access_audit_evaluate(array $config, array $members)
             $wanted = array((int)$config['legion_group']);
         }
 
+        // A squad's group is for its Active members only, whichever unit the squad is in.
+        // It goes last, so that it is never the one made primary in place of another.
+        if($wanted && $record['status'] === ACCESS_AUDIT_ACTIVE)
+        {
+            $squad_group = access_audit_squad_group($config, $record);
+            if($squad_group > 0)
+            {
+                $wanted[] = $squad_group;
+            }
+        }
+
         $plan = $wanted === null ? null : access_audit_plan($member, $wanted, $config);
 
         $results[] = array(
@@ -396,7 +541,7 @@ function access_audit_is_banned(array $member, array $groups)
  * @param array $member As access_audit_members()
  * @param array $wanted The audited groups the member belongs in, the one to make primary
  *                      if need be first: none, the 501st members group, or it and one of
- *                      the unit's two
+ *                      the unit's two - and a squad's group after those
  * @param array $config As access_audit_config()
  * @return array 'usergroup', 'additionalgroups' (comma separated), 'displaygroup', 'add'
  *               and 'remove' (group ids), 'primary_from' and 'primary_to' (group ids, equal

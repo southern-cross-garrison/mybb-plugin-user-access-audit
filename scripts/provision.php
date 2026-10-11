@@ -92,6 +92,9 @@ $groups = array(
     'unit' => provision_usergroup('Garrison Members'),
     'legion' => provision_usergroup('501st Members'),
     'reserve' => provision_usergroup('Garrison Reserve'),
+    // A squad's, which the board audits, and another for the specs to choose.
+    'squad' => provision_usergroup('Hunter Valley Squad Members'),
+    'otherSquad' => provision_usergroup('Illawarra Squad Members'),
     // One it must never touch, the way a board's command staff group is.
     'command' => provision_usergroup('Command Staff'),
 );
@@ -243,6 +246,9 @@ $plugin_settings = array(
     'access_audit_unit_group' => (string)$groups['unit'],
     'access_audit_reserve_group' => (string)$groups['reserve'],
     'access_audit_legion_group' => (string)$groups['legion'],
+    // The stand-in API's Hunter Valley Squad. Nobody is in it until a spec says so, so the
+    // squad's group is in play for every spec without changing what any of them expect.
+    'access_audit_squads' => json_encode(array(array('squad' => 301, 'name' => 'Hunter Valley Squad', 'group' => $groups['squad']))),
 );
 foreach ($plugin_settings as $name => $value) {
     $db->update_query('settings', array('value' => $db->escape_string($value)), "name = '" . $db->escape_string($name) . "'");

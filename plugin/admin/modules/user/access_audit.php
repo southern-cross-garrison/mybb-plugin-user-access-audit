@@ -4,7 +4,7 @@
  *
  * The audit: every member, what the 501st's records say about them, and what has to
  * change for their groups to match, fixed one member at a time. And the Settings
- * tab, which says which unit and which groups the audit is about.
+ * tab, which says which unit, which squads and which groups the audit is about.
  */
 
 if(!defined("IN_MYBB"))
@@ -148,6 +148,13 @@ if($action == "settings")
 {
     $errors = array();
 
+    // The squads already saved, by id, for their names while the API is down.
+    $saved_squads = array();
+    foreach((array)access_audit_parse_squads(access_audit_setting('squads')) as $squad)
+    {
+        $saved_squads[$squad['squad']] = $squad;
+    }
+
     $values = array(
         'api_url'       => access_audit_setting('api_url'),
         'unit'          => (int)access_audit_setting('unit'),
@@ -155,6 +162,7 @@ if($action == "settings")
         'unit_group'    => (int)access_audit_setting('unit_group'),
         'reserve_group' => (int)access_audit_setting('reserve_group'),
         'legion_group'  => (int)access_audit_setting('legion_group'),
+        'squads'        => array_values($saved_squads),
     );
 
     if($mybb->request_method == "post")
@@ -166,11 +174,38 @@ if($action == "settings")
             'unit_group'    => $mybb->get_input('unit_group', MyBB::INPUT_INT),
             'reserve_group' => $mybb->get_input('reserve_group', MyBB::INPUT_INT),
             'legion_group'  => $mybb->get_input('legion_group', MyBB::INPUT_INT),
+            'squads'        => array(),
         );
+
+        // One row per squad, as squads[n][squad] and squads[n][group]. A row with neither
+        // chosen is a spare one left empty, or a squad taken off the list.
+        foreach($mybb->get_input('squads', MyBB::INPUT_ARRAY) as $row)
+        {
+            $row = is_array($row) ? $row : array();
+            $squad_row = array(
+                'squad' => isset($row['squad']) && is_scalar($row['squad']) ? (int)$row['squad'] : 0,
+                'name'  => '',
+                'group' => isset($row['group']) && is_scalar($row['group']) ? (int)$row['group'] : 0,
+            );
+            if($squad_row['squad'] > 0 || $squad_row['group'] > 0)
+            {
+                $values['squads'][] = $squad_row;
+            }
+        }
     }
 
-    // From the address being saved, so changing it and choosing a unit work in one go.
+    // From the address being saved, so changing it and choosing a unit work in one go. The
+    // squads are the unit's being saved too, so a squad kept from another unit is refused.
     $units = access_audit_valid_api_url($values['api_url']) ? access_audit_api_units($values['api_url']) : null;
+    $squads = null;
+    if($values['unit'] <= 0)
+    {
+        $squads = array();
+    }
+    elseif(access_audit_valid_api_url($values['api_url']))
+    {
+        $squads = access_audit_api_squads($values['unit'], $values['api_url']);
+    }
 
     $fields = array();
     $query = $db->simple_select("profilefields", "fid, name", "", array("order_by" => "disporder, name", "order_dir" => "ASC"));
@@ -199,6 +234,7 @@ if($action == "settings")
         }
 
         $unit_name = '';
+        $unit_ok = false;
         if($values['unit'] <= 0)
         {
             $errors[] = $lang->access_audit_error_unit;
@@ -212,12 +248,14 @@ if($action == "settings")
             else
             {
                 $unit_name = $units[$values['unit']]['name'];
+                $unit_ok = true;
             }
         }
         elseif($values['unit'] === (int)access_audit_setting('unit'))
         {
             // The API is down, and the unit is the one already saved: keep its name.
             $unit_name = access_audit_setting('unit_name');
+            $unit_ok = true;
         }
         else
         {
@@ -244,10 +282,78 @@ if($action == "settings")
             $errors[] = $lang->access_audit_error_legion_group;
         }
 
-        if(!access_audit_groups_distinct(array($values['unit_group'], $values['reserve_group'], $values['legion_group'])))
+        $core_groups = array($values['unit_group'], $values['reserve_group'], $values['legion_group']);
+        if(!access_audit_groups_distinct($core_groups))
         {
             $errors[] = $lang->access_audit_error_same_group;
         }
+
+        // Each problem is said once, however many rows have it.
+        $squad_errors = array();
+        $chosen_squads = array();
+        foreach($values['squads'] as $squad_row)
+        {
+            if($squad_row['squad'] <= 0 || $squad_row['group'] <= 0)
+            {
+                $squad_errors['incomplete'] = $lang->access_audit_error_squad_incomplete;
+                continue;
+            }
+
+            if($squads !== null)
+            {
+                // Which squads are the unit's means nothing until there is a unit, and it
+                // has been said already that there is not.
+                if(!$unit_ok)
+                {
+                    continue;
+                }
+                if(!isset($squads[$squad_row['squad']]))
+                {
+                    $squad_errors['squad'] = $lang->access_audit_error_squad;
+                    continue;
+                }
+                $squad_row['name'] = $squads[$squad_row['squad']];
+            }
+            elseif(isset($saved_squads[$squad_row['squad']]))
+            {
+                // The API is down, and the squad is one already saved: keep its name.
+                $squad_row['name'] = $saved_squads[$squad_row['squad']]['name'];
+            }
+            else
+            {
+                $squad_errors['unavailable'] = $lang->access_audit_error_squads_unavailable;
+                continue;
+            }
+
+            if(!isset($groups[$squad_row['group']]))
+            {
+                $squad_errors['group'] = $lang->access_audit_error_squad_group;
+                continue;
+            }
+
+            if(isset($chosen_squads[$squad_row['squad']]))
+            {
+                $squad_errors['twice'] = $lang->access_audit_error_same_squad;
+                continue;
+            }
+
+            $chosen_squads[$squad_row['squad']] = $squad_row;
+        }
+
+        if(access_audit_groups_distinct($core_groups))
+        {
+            $all_groups = $core_groups;
+            foreach($chosen_squads as $squad_row)
+            {
+                $all_groups[] = $squad_row['group'];
+            }
+            if(!access_audit_groups_distinct($all_groups))
+            {
+                $squad_errors['same_group'] = $lang->access_audit_error_squad_same_group;
+            }
+        }
+
+        $errors = array_merge($errors, array_values($squad_errors));
 
         if(!$errors)
         {
@@ -261,6 +367,7 @@ if($action == "settings")
                 'access_audit_unit_group'      => (string)$values['unit_group'],
                 'access_audit_reserve_group'   => (string)$values['reserve_group'],
                 'access_audit_legion_group'    => (string)$values['legion_group'],
+                'access_audit_squads'          => access_audit_encode_squads(array_values($chosen_squads)),
             );
             foreach($settings as $name => $value)
             {
@@ -361,6 +468,56 @@ if($action == "settings")
 
     $container->end();
 
+    $squad_options = array(0 => $lang->access_audit_choose);
+    if($squads !== null)
+    {
+        $squad_options += $squads;
+    }
+    else
+    {
+        // Without the list there are still the squads already saved, so they can be kept,
+        // moved to another group or taken off while the API is down.
+        foreach($saved_squads as $id => $squad)
+        {
+            $squad_options[$id] = access_audit_squad_name($squad);
+        }
+    }
+
+    $squad_table = new Table;
+    $squad_table->construct_header($lang->access_audit_col_squad, array('width' => '50%'));
+    $squad_table->construct_header($lang->access_audit_col_squad_group, array('width' => '50%'));
+
+    $squad_note = '';
+    if($squads === null)
+    {
+        $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_unavailable\">{$lang->access_audit_squads_unavailable}</div>";
+    }
+    elseif($values['unit'] <= 0)
+    {
+        $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_no_unit\">{$lang->access_audit_squads_no_unit}</div>";
+    }
+    elseif(!$squads)
+    {
+        $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_none\">{$lang->access_audit_squads_none}</div>";
+    }
+    $squad_table->construct_cell($squad_note . $lang->access_audit_squads_desc, array('colspan' => 2));
+    $squad_table->construct_row();
+
+    // The squads chosen, then a few empty rows to add more with. There is no script to add
+    // rows: saving brings up fresh empty ones.
+    $squad_rows = $values['squads'];
+    for($spare = 0; $spare < 3; $spare++)
+    {
+        $squad_rows[] = array('squad' => 0, 'group' => 0);
+    }
+    foreach($squad_rows as $index => $squad_row)
+    {
+        $squad_table->construct_cell($form->generate_select_box("squads[{$index}][squad]", $squad_options, $squad_row['squad'], array('id' => "squad_{$index}")));
+        $squad_table->construct_cell($form->generate_select_box("squads[{$index}][group]", $group_options, $squad_row['group'], array('id' => "squad_group_{$index}")));
+        $squad_table->construct_row(array('class' => 'access-audit-squad-row'));
+    }
+    $squad_table->output($lang->access_audit_squads);
+
     $form->output_submit_wrapper(array($form->generate_submit_button($lang->access_audit_save_settings, array('id' => 'access_audit_save_settings'))));
     $form->end();
 
@@ -426,12 +583,20 @@ if(!$action)
     $unit_name = $config['unit_name'] !== '' ? htmlspecialchars_uni($config['unit_name']) : '#' . (int)$config['unit'];
     $oldest = access_audit_oldest_lookup();
 
-    $summary = new Table;
-    $summary->construct_cell($lang->sprintf($lang->access_audit_summary_rules,
+    $rules = $lang->sprintf($lang->access_audit_summary_rules,
         $unit_name,
         access_audit_group_name($config['unit_group']),
         access_audit_group_name($config['legion_group']),
-        access_audit_group_name($config['reserve_group'])), array('colspan' => 2));
+        access_audit_group_name($config['reserve_group']));
+    foreach($config['squads'] as $squad)
+    {
+        $rules .= ' ' . $lang->sprintf($lang->access_audit_summary_squad,
+            htmlspecialchars_uni(access_audit_squad_name($squad)),
+            access_audit_group_name($squad['group']));
+    }
+
+    $summary = new Table;
+    $summary->construct_cell($rules, array('colspan' => 2, 'id' => 'access_audit_rules'));
     $summary->construct_row();
     foreach(array('checked', 'ok', 'fix', 'unchecked', 'banned', 'shared') as $key)
     {
@@ -547,6 +712,10 @@ if(!$action)
                     if($record['garrison_name'] !== '')
                     {
                         $record_html .= " - <span class=\"access-audit-unit\">" . htmlspecialchars_uni($record['garrison_name']) . "</span>";
+                    }
+                    if($record['squad_name'] !== '')
+                    {
+                        $record_html .= " - <span class=\"access-audit-squad\">" . htmlspecialchars_uni($record['squad_name']) . "</span>";
                     }
                     if($record['name'] !== '')
                     {

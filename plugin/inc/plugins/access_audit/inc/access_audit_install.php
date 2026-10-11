@@ -241,6 +241,16 @@ function access_audit_install_settings()
             "value"       => "",
             "disporder"   => 7,
         ),
+        // A list, kept as JSON (see access_audit_parse_squads()), which only the plugin's
+        // own tab can edit sensibly.
+        array(
+            "name"        => "access_audit_squads",
+            "title"       => "Squads",
+            "description" => "Which squads are audited, and the group each one's active members belong in. Choose them under Users & Groups -> Access Audit -> Settings rather than here.",
+            "optionscode" => "textarea",
+            "value"       => "",
+            "disporder"   => 8,
+        ),
     );
 
     foreach($settings as $setting)

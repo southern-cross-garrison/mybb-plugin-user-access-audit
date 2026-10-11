@@ -3,15 +3,16 @@
 Checks every forum member's groups against their 501st Legion record. Every Active or
 Reserve 501st member belongs in a 501st members group; your unit's own Active members belong
 in your unit members group as well, and its Reserve members in your reserve members group;
-everybody else belongs in none of them. The audit lists who is in the wrong place and fixes
+Active members of a squad you choose belong in that squad's group; everybody else belongs in
+none of them. The audit lists who is in the wrong place and fixes
 them one at a time, after you have looked.
 
 ## Features
 
 - **Every member checked.** Each member's Legion ID, from the profile field you choose, is
   looked up on the 501st Legion's API.
-- **Only three groups touched.** The audit manages your unit members, reserve members and
-  501st members groups, and nothing else. Command staff, moderators, administrators and any other
+- **Only its own groups touched.** The audit manages your unit members, reserve members and
+  501st members groups, and a group for each squad you choose, and nothing else. Command staff, moderators, administrators and any other
   group a member is in are left exactly as they are.
 - **One member at a time.** Each row has its own Fix button. There is deliberately no way to
   fix everybody at once: every change gives somebody access or takes it away.
@@ -37,7 +38,7 @@ them one at a time, after you have looked.
 2. In the Admin CP, go to Configuration -> Plugins and click **Install & Activate** beside
    Access Audit.
 3. Go to Users & Groups -> Access Audit -> Settings and choose your unit, the Legion ID
-   profile field and the three groups.
+   profile field and the three groups, and any squads you want audited.
 
 ## Upgrading
 
@@ -64,6 +65,24 @@ Under Users & Groups -> Access Audit -> Settings:
 
 The three groups must all be different groups.
 
+### Squads
+
+Below those, the **Squads** table pairs squads with groups, one squad per row. Pick one of your
+unit's squads and the group its Active members belong in. Squads are optional and
+come on top of the rules above. Choose a squad and its group in an empty row to add one, and
+set a squad back to Choose... to stop auditing it. Three empty rows are offered each time,
+and saving brings up more.
+
+Each squad's group must be a group of its own, not another squad's and not one of the three
+groups above. Only the squads of the unit saved above are offered. The 501st's list of squads does not
+say which unit each belongs to, so the plugin looks up each squad's officers and goes by the
+unit on their records. A squad with no officer on a public record cannot be placed, and is
+not offered. If you change the unit, take the old unit's squads off in the same save; the new
+unit's squads are offered once it is saved.
+
+While the API is down, the squads already chosen can still be kept, moved to another group or
+taken off, but new ones cannot be added.
+
 They also appear under Configuration -> Settings -> Access Audit, but as plain boxes; use
 the plugin's own tab, which offers the lists.
 
@@ -79,6 +98,11 @@ A Legion ID is read as its digits, so "TK-12345", "TK 12345" and "12345" are all
 | Is Active or Reserve in another unit (an outpost is a unit too) | The 501st members group                      |
 | Is Active in your unit                                          | The unit members and 501st members groups    |
 | Is Reserve in your unit                                         | The reserve members and 501st members groups |
+
+On top of that, a member who is Active in one of the squads you chose belongs in that squad's
+group, whichever unit the squad is in. Nobody else belongs in it: a member who has left the
+squad, gone to the reserve or is no longer a 501st member is taken out of it. A squad you
+have not chosen means nothing to the audit, and neither does its group.
 
 "No public record" is what the API says both for a member who has made their record private
 and for an ID that does not exist, and in practice it is mostly members who have left or
@@ -112,7 +136,8 @@ is lifted, so anything changed now would be undone then.
   which a member cannot be without, it is swapped for the group they now belong in - the
   reserve members group for a member of your unit gone to the reserve, the unit members
   group for one back from it, the 501st members group for one gone to another unit - or for
-  Registered when they belong in none.
+  Registered when they belong in none. A squad's group is never the one made primary in
+  its place.
 - If the group taken away was the one shown beside their name, MyBB goes back to showing
   their primary group.
 
@@ -132,9 +157,12 @@ not give is never kept, so it is asked for again next time.
 
 ## Database tables
 
-| Table                          | Holds                                   |
-| ------------------------------ | --------------------------------------- |
-| `access_audit_lookups`         | The API's recent answers, by Legion ID  |
+| Table                  | Holds                                  |
+| ---------------------- | -------------------------------------- |
+| `access_audit_lookups` | The API's recent answers, by Legion ID |
+
+Upgrading to the release with squads forgets the answers kept so far, so the first audit
+afterwards asks the API about everybody again.
 | `access_audit_schema_upgrades` | Which schema upgrades the board has had |
 
 ## License

@@ -18,6 +18,44 @@ export const OUR_UNIT = { id: 80, name: 'Southern Cross Garrison' };
 export const OTHER_UNIT = { id: 43, name: 'Midsouth Garrison' };
 export const OUTPOST = { id: 55, name: 'Saudi Arabian Outpost' };
 
+/**
+ * The squads the stand-in lists: two of this unit's, the first of which the board audits
+ * as provisioned, and one of another unit's.
+ *
+ * /squads does not say which unit a squad is in, so the plugin reads it from the records
+ * of the squad's officers, which every test starts with stubbed: Illawarra's first officer
+ * has no public record, so it is placed by its second.
+ */
+export const SQUAD = { id: 301, name: 'Hunter Valley Squad', officers: [40001] };
+export const OTHER_SQUAD = { id: 302, name: 'Illawarra Squad', officers: [40002, 40003] };
+export const UNAUDITED_SQUAD = { id: 102, name: 'Snowy Range Squad', officers: [40004] };
+
+/** Shaped as the real /squads is, under "squad", in the API's own order. */
+export const SQUADS = [UNAUDITED_SQUAD, SQUAD, OTHER_SQUAD].map((squad) => ({
+	squadId: squad.id,
+	name: squad === OTHER_SQUAD ? ` ${squad.name}` : squad.name,
+	logoPrefix: squad.name.replace(/ /g, '-'),
+	area: 'Somewhere',
+	url: 'example.test',
+	unitLogo: '',
+	unitLogoSmall: '',
+	officers: squad.officers.map((legionId) => ({
+		officeAcronym: 'SL',
+		office: 'Squad Leader',
+		legionId,
+		formattedLegionId: `TK ${legionId}`,
+		fullName: 'Squad Officer',
+	})),
+}));
+
+/** Stub the squad officers' records, which place each squad in its unit. */
+export function stubSquadOfficers(): void {
+	stubLegionApi(40001, legionApiMember(40001, { squad: SQUAD }));
+	stubLegionApi(40002, CLASSIFIED);
+	stubLegionApi(40003, legionApiMember(40003, { squad: OTHER_SQUAD }));
+	stubLegionApi(40004, legionApiMember(40004, { unit: OTHER_UNIT, squad: UNAUDITED_SQUAD }));
+}
+
 /** Shaped as the real /garrisons is, officers and all, in the API's own order. */
 export const UNITS = [OUR_UNIT, OTHER_UNIT, OUTPOST].map((unit) => ({
 	garrisonId: unit.id,
@@ -40,18 +78,33 @@ export function installLegionApiStub(): void {
 	resetLegionApiStub();
 }
 
-/** Back to the stock list of units and no members, and forget every logged request. */
+/**
+ * Back to the stock lists of units and squads, their officers and no members, and forget
+ * every logged request.
+ */
 export function resetLegionApiStub(): void {
 	fs.rmSync(STUB_DIR, { recursive: true, force: true });
 	fs.mkdirSync(STUB_DIR, { recursive: true });
 	// Apache writes the request log, and on Linux it is not the user that made the folder.
 	fs.chmodSync(STUB_DIR, 0o777);
 	stubUnits({ body: { garrisons: UNITS } });
+	stubSquads({ body: { squad: SQUADS } });
+	stubSquadOfficers();
 }
 
 /** Say what /garrisons answers. */
 export function stubUnits(response: LegionApiResponse): void {
 	fs.writeFileSync(path.join(STUB_DIR, 'garrisons.json'), JSON.stringify(response));
+}
+
+/** Say what /squads answers. */
+export function stubSquads(response: LegionApiResponse): void {
+	fs.writeFileSync(path.join(STUB_DIR, 'squads.json'), JSON.stringify(response));
+}
+
+/** Make /squads answer 503. */
+export function squadsDown(): void {
+	fs.rmSync(path.join(STUB_DIR, 'squads.json'), { force: true });
 }
 
 /** Make /garrisons answer 503. */
@@ -76,7 +129,13 @@ export function legionApiMember(
 		status = 'Active',
 		unit = OUR_UNIT,
 		fullName = 'Fixture Trooper',
-	}: { status?: string; unit?: { id: number; name: string }; fullName?: string } = {}
+		squad = null,
+	}: {
+		status?: string;
+		unit?: { id: number; name: string };
+		fullName?: string;
+		squad?: { id: number; name: string } | null;
+	} = {}
 ): LegionApiResponse {
 	return {
 		body: {
@@ -93,8 +152,9 @@ export function legionApiMember(
 			memberStanding: 'Good',
 			garrisonId: unit.id,
 			garrisonName: unit.name,
-			squadId: '',
-			squadName: 'No Squad',
+			// A string, as the real API gives it, and empty for a member in no squad.
+			squadId: squad ? String(squad.id) : '',
+			squadName: squad ? squad.name : 'No Squad',
 			roles: {},
 		},
 	};
@@ -121,7 +181,7 @@ export function legionApiRequests(): string[] {
 	return fs.readFileSync(REQUEST_LOG, 'utf8').split('\n').filter(Boolean);
 }
 
-/** The member lookups among them. */
+/** The member lookups among them, the squad officers' included. */
 export function memberRequests(): string[] {
 	return legionApiRequests().filter((request) => request.startsWith('/legionId/'));
 }

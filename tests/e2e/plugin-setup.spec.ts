@@ -20,6 +20,7 @@ const SETTINGS = [
 	'access_audit_unit_group',
 	'access_audit_legion_group',
 	'access_audit_reserve_group',
+	'access_audit_squads',
 ];
 
 const pluginRow = (page: Page) =>
@@ -115,6 +116,60 @@ test.describe('the schema', () => {
 			await reinstall();
 		}
 		expect(await columnNames('access_audit_lookups')).not.toContain('profile_url');
+	});
+});
+
+test.describe('the squad upgrade', () => {
+	const ADD_SQUAD = '0002_add_lookups_squad';
+
+	test('adds the squad to kept answers, and forgets the ones from before', async ({ page }) => {
+		// The board as a release from before squads left it, with an answer kept.
+		await execute(`ALTER TABLE ${T('access_audit_lookups')} DROP squad_id, DROP squad_name`);
+		await execute(`DELETE FROM ${T('access_audit_schema_upgrades')} WHERE name = ?`, [ADD_SQUAD]);
+		await execute(
+			`INSERT INTO ${T('access_audit_lookups')} (legion_id, member_status, full_name, fetched_at)
+			 VALUES (10001, 'Active', 'Fixture Trooper', UNIX_TIMESTAMP())`
+		);
+		try {
+			await clickPluginLink(page, 'Deactivate');
+			await clickPluginLink(page, 'Activate');
+
+			expect(await columnNames('access_audit_lookups')).toEqual(
+				expect.arrayContaining(['squad_id', 'squad_name'])
+			);
+			// It said nothing about a squad, which would read as being in none.
+			expect(await lookups()).toEqual([]);
+		} finally {
+			// Run again, as after a failure part way: it has to be safe either way.
+			await execute(`DELETE FROM ${T('access_audit_schema_upgrades')} WHERE name = ?`, [ADD_SQUAD]);
+			await reinstall();
+		}
+		expect(await columnNames('access_audit_lookups')).toEqual(
+			expect.arrayContaining(['squad_id', 'squad_name'])
+		);
+	});
+
+	test('leaves a board with no squads chosen auditing as before', async ({ page }) => {
+		// The board as a release from before squads left it.
+		await execute(`DELETE FROM ${T('settings')} WHERE name = 'access_audit_squads'`);
+		await runPhp('rebuild_settings();');
+		try {
+			await clickPluginLink(page, 'Deactivate');
+			await clickPluginLink(page, 'Activate');
+
+			expect(await settingNames()).toEqual(SETTINGS);
+			expect(await getSetting('access_audit_squads')).toBe('');
+
+			await gotoAudit(page);
+			await expect(page.locator('#access_audit_count_checked')).toBeVisible();
+		} finally {
+			await reinstall();
+			await setSettings({
+				access_audit_squads: JSON.stringify([
+					{ squad: 301, name: 'Hunter Valley Squad', group: fixtures().groups.squad },
+				]),
+			});
+		}
 	});
 });
 

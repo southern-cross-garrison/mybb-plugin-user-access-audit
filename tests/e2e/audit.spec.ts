@@ -19,6 +19,8 @@ import {
 	CLASSIFIED,
 	OTHER_UNIT,
 	OUTPOST,
+	SQUAD,
+	UNAUDITED_SQUAD,
 	legionApiMember,
 	memberRequests,
 	stubFixtureMembers,
@@ -28,7 +30,9 @@ import {
 
 /**
  * The audit: every member judged by their Legion ID's 501st record, and their membership
- * of the three audited groups fixed one row at a time.
+ * of the audited groups fixed one row at a time. As provisioned, the board audits one
+ * squad, the Hunter Valley Squad, whose group is Hunter Valley Squad Members; nobody is in
+ * either until a test says so.
  *
  * Provisioned members and the records stubFixtureMembers() gives them:
  *   unitmember   TK-10001  Active, this unit       Garrison Members, 501st Members
@@ -364,6 +368,166 @@ test.describe('who belongs where', () => {
 		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
 			'Remove from Garrison Members; Remove from 501st Members'
 		);
+	});
+});
+
+test.describe('squads', () => {
+	test('an Active member of an audited squad joins its group as well', async ({ page }) => {
+		stubLegionApi(10001, legionApiMember(10001, { squad: SQUAD }));
+		await openAudit(page);
+
+		const member = row(page, 'unitmember');
+		await expect(member.locator('.access-audit-squad')).toHaveText(SQUAD.name);
+		await expect(member.locator('.access-audit-change')).toHaveText(
+			'Add to Hunter Valley Squad Members'
+		);
+
+		await fix(page, 'unitmember');
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: REGISTERED,
+			additionalgroups: [groups().unit, groups().legion, groups().squad].sort((a, b) => a - b),
+			displaygroup: 0,
+		});
+	});
+
+	test('an Active member of another unit in an audited squad joins its group too', async ({
+		page,
+	}) => {
+		stubLegionApi(10002, legionApiMember(10002, { unit: OTHER_UNIT, squad: SQUAD }));
+		await openAudit(page);
+
+		await expect(row(page, 'legionmember').locator('.access-audit-change')).toHaveText(
+			'Add to Hunter Valley Squad Members'
+		);
+	});
+
+	test('a member in the right squad group needs nothing, and it is shown with the others', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			additionalgroups: [groups().unit, groups().legion, groups().squad],
+		});
+		stubLegionApi(10001, legionApiMember(10001, { squad: SQUAD }));
+		await openAudit(page, { all: true });
+
+		const member = row(page, 'unitmember');
+		await expect(member.locator('.access-audit-groups')).toHaveText(
+			'Garrison Members501st MembersHunter Valley Squad Members'
+		);
+		await expect(member.locator('.access-audit-change')).toHaveText('Nothing');
+	});
+
+	test('a member who has left the squad leaves its group', async ({ page }) => {
+		await setGroups('unitmember', {
+			additionalgroups: [groups().unit, groups().legion, groups().squad],
+		});
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Remove from Hunter Valley Squad Members'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual(
+			[groups().unit, groups().legion].sort((a, b) => a - b)
+		);
+	});
+
+	test('a Reserve member of the squad does not belong in its group', async ({ page }) => {
+		await setGroups('unitmember', {
+			additionalgroups: [groups().reserve, groups().legion, groups().squad],
+		});
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Reserve', squad: SQUAD }));
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Remove from Hunter Valley Squad Members'
+		);
+	});
+
+	test('a member of the squad who is no longer a 501st member leaves every group', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			additionalgroups: [groups().unit, groups().legion, groups().squad],
+		});
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired', squad: SQUAD }));
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Remove from Garrison Members; Remove from 501st Members; Remove from Hunter Valley Squad Members'
+		);
+	});
+
+	test('a member of a squad the board does not audit gets no squad group', async ({ page }) => {
+		stubLegionApi(10001, legionApiMember(10001, { squad: UNAUDITED_SQUAD }));
+		await openAudit(page, { all: true });
+
+		const member = row(page, 'unitmember');
+		await expect(member.locator('.access-audit-squad')).toHaveText(UNAUDITED_SQUAD.name);
+		await expect(member.locator('.access-audit-change')).toHaveText('Nothing');
+	});
+
+	test('a squad group taken away as primary becomes the group they belong in', async ({ page }) => {
+		await setGroups('unitmember', {
+			usergroup: groups().squad,
+			additionalgroups: [groups().unit, groups().legion],
+		});
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Remove from Hunter Valley Squad Members; Primary group becomes Garrison Members'
+		);
+		await fix(page, 'unitmember');
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: groups().unit,
+			additionalgroups: [groups().legion],
+			displaygroup: 0,
+		});
+	});
+
+	test('are named in the summary, each with its group', async ({ page }) => {
+		const restore = await withSettings({
+			access_audit_squads: JSON.stringify([
+				{ squad: SQUAD.id, name: SQUAD.name, group: groups().squad },
+				{ squad: 302, name: 'Illawarra Squad', group: groups().otherSquad },
+			]),
+		});
+		try {
+			await openAudit(page);
+			await expect(page.locator('#access_audit_rules')).toContainText(
+				'Active members of Hunter Valley Squad belong in Hunter Valley Squad Members as well. Active members of Illawarra Squad belong in Illawarra Squad Members as well.'
+			);
+		} finally {
+			await restore();
+		}
+	});
+
+	test('none chosen leaves a squad group alone, as any other group', async ({ page }) => {
+		const restore = await withSettings({ access_audit_squads: '' });
+		try {
+			await setGroups('guestmember', { additionalgroups: [groups().squad] });
+			stubLegionApi(10001, legionApiMember(10001, { squad: SQUAD }));
+			await openAudit(page, { all: true });
+
+			await expect(page.locator('#access_audit_rules')).not.toContainText('Squad');
+			await expect(row(page, 'guestmember').locator('.access-audit-change')).toHaveText('Nothing');
+			await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText('Nothing');
+		} finally {
+			await restore();
+		}
+	});
+
+	test("a squad's name from the API is shown as text", async ({ page }) => {
+		const record = legionApiMember(10001, { squad: SQUAD }) as { body: Record<string, unknown> };
+		stubLegionApi(10001, {
+			body: { ...record.body, squadName: '<img id="squad" src=x>' },
+		});
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-squad')).toHaveText(
+			'<img id="squad" src=x>'
+		);
+		await expect(page.locator('#squad')).toHaveCount(0);
 	});
 });
 
@@ -927,6 +1091,42 @@ test.describe('before it is set up', () => {
 			await notice.locator('a', { hasText: 'Settings' }).click();
 			await expect(page.locator('#access_audit_save_settings')).toBeVisible();
 			expect(memberRequests()).toEqual([]);
+		} finally {
+			await restore();
+		}
+	});
+
+	for (const [problem, value] of [
+		['a deleted group', JSON.stringify([{ squad: SQUAD.id, name: SQUAD.name, group: 998 }])],
+		['a setting it cannot read', 'not json'],
+	]) {
+		test(`counts squads with ${problem} as not set up, rather than skipping them`, async ({
+			page,
+		}) => {
+			const restore = await withSettings({ access_audit_squads: value });
+			try {
+				await page.goto('/admin/index.php?module=user-access_audit');
+				await expect(page.locator('#access_audit_not_configured li')).toHaveText([
+					'Squads - one of their groups no longer exists, or the setting cannot be read',
+				]);
+				expect(memberRequests()).toEqual([]);
+			} finally {
+				await restore();
+			}
+		});
+	}
+
+	test("counts a squad's group that is one of the others as not set up", async ({ page }) => {
+		const restore = await withSettings({
+			access_audit_squads: JSON.stringify([
+				{ squad: SQUAD.id, name: SQUAD.name, group: groups().legion },
+			]),
+		});
+		try {
+			await page.goto('/admin/index.php?module=user-access_audit');
+			await expect(page.locator('#access_audit_not_configured li')).toHaveText([
+				"Each squad's group must be a group of its own, not another squad's or one of the other three",
+			]);
 		} finally {
 			await restore();
 		}
