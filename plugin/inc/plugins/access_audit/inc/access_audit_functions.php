@@ -4,16 +4,21 @@
  *
  * Every member is judged by the Legion ID on their profile:
  *
- * - no Legion ID: in none of the three groups;
+ * - no Legion ID: in none of the four groups;
  * - a 501st record that is neither Active nor Reserve (a classified record, anything
- *   else): in none;
+ *   else): in none - except Retired in this unit, below;
  * - Active or Reserve, in another unit: in the 501st members group only;
  * - Active, in this unit: in the unit members group and the 501st members group - they are
  *   501st members as much as anybody;
- * - Reserve, in this unit: in the reserve members group and the 501st members group.
+ * - Reserve, in this unit: in the reserve members group and the 501st members group;
+ * - Retired, in this unit: in the retired members group and nothing else.
  *
  * On top of that, an Active member of one of the squads chosen in the settings is in that
  * squad's group, and nobody else is.
+ *
+ * A member with no Legion ID on their profile is looked up by their email address first.
+ * A Legion ID found that way is the one they are judged by, and fixing them saves it to
+ * their profile.
  *
  * Only those groups are ever changed. Every other group a member is in - command staff,
  * moderators, administrators - is left exactly as it is.
@@ -42,6 +47,13 @@ define('ACCESS_AUDIT_ACTIVE', 'Active');
 define('ACCESS_AUDIT_RESERVE', 'Reserve');
 
 /**
+ * Retired members are no longer 501st members, but this unit's own keep a group of their
+ * own, and are in it alone. A retired member whose record is private comes back as a
+ * classified record like anybody else, and cannot be told apart.
+ */
+define('ACCESS_AUDIT_RETIRED', 'Retired');
+
+/**
  * The group a member is moved to when the group being taken away from them is their
  * primary group and they belong in none: MyBB's Registered group.
  */
@@ -57,6 +69,7 @@ define('ACCESS_AUDIT_OTHER_UNIT', 'other_unit');
 define('ACCESS_AUDIT_OUR_UNIT', 'our_unit');
 define('ACCESS_AUDIT_OTHER_UNIT_RESERVE', 'other_unit_reserve');
 define('ACCESS_AUDIT_OUR_UNIT_RESERVE', 'our_unit_reserve');
+define('ACCESS_AUDIT_OUR_UNIT_RETIRED', 'our_unit_retired');
 define('ACCESS_AUDIT_BANNED', 'banned');
 
 /**
@@ -193,9 +206,9 @@ function access_audit_squad_name(array $squad)
 /**
  * The audit's configuration, and what is missing from it.
  *
- * @return array 'unit', 'unit_name', 'field', 'unit_group', 'reserve_group', 'legion_group',
- *               'squads' (as access_audit_parse_squads(), empty when unusable) and 'missing'
- *               (language keys for each setting that is not usable)
+ * @return array 'unit', 'unit_name', 'field', 'unit_group', 'reserve_group', 'retired_group',
+ *               'legion_group', 'squads' (as access_audit_parse_squads(), empty when
+ *               unusable) and 'missing' (language keys for each setting that is not usable)
  */
 function access_audit_config()
 {
@@ -207,6 +220,7 @@ function access_audit_config()
         'field'         => (int)access_audit_setting('legion_id_field'),
         'unit_group'    => (int)access_audit_setting('unit_group'),
         'reserve_group' => (int)access_audit_setting('reserve_group'),
+        'retired_group' => (int)access_audit_setting('retired_group'),
         'legion_group'  => (int)access_audit_setting('legion_group'),
         'squads'        => access_audit_parse_squads(access_audit_setting('squads')),
         'missing'       => array(),
@@ -232,6 +246,7 @@ function access_audit_config()
     $labels = array(
         'unit_group'    => 'access_audit_setting_unit_group',
         'reserve_group' => 'access_audit_setting_reserve_group',
+        'retired_group' => 'access_audit_setting_retired_group',
         'legion_group'  => 'access_audit_setting_legion_group',
     );
     foreach($labels as $key => $label)
@@ -242,7 +257,7 @@ function access_audit_config()
         }
     }
 
-    $core_groups = array($config['unit_group'], $config['reserve_group'], $config['legion_group']);
+    $core_groups = array($config['unit_group'], $config['reserve_group'], $config['retired_group'], $config['legion_group']);
     if(!access_audit_groups_distinct($core_groups))
     {
         $config['missing'][] = 'access_audit_setting_same_group';
@@ -287,14 +302,14 @@ function access_audit_groups_distinct(array $gids)
 
 /**
  * The groups the audit manages, in the order their changes are described: the unit's own
- * two, then the 501st members group, then each squad's.
+ * three, then the 501st members group, then each squad's.
  *
  * @param array $config As access_audit_config()
  * @return array Of int
  */
 function access_audit_audited_groups(array $config)
 {
-    $gids = array((int)$config['unit_group'], (int)$config['reserve_group'], (int)$config['legion_group']);
+    $gids = array((int)$config['unit_group'], (int)$config['reserve_group'], (int)$config['retired_group'], (int)$config['legion_group']);
     foreach($config['squads'] as $squad)
     {
         $gids[] = (int)$squad['group'];
@@ -324,12 +339,14 @@ function access_audit_squad_group(array $config, array $record)
 }
 
 /**
- * The members to audit, with their groups, post count and the Legion ID on their
- * profile, in username order.
+ * The members to audit, with their groups, post count, email address and the Legion ID on
+ * their profile, in username order.
  *
  * @param array $config As access_audit_config()
  * @param int $uid Just this member; 0 for everybody
- * @return array
+ * @return array Each with 'legion_id' trimmed, and 'legion_id_stored' as it is in the
+ *               database (null for none) and 'has_userfields', for saving a Legion ID
+ *               found by email (see access_audit_save_legion_id())
  */
 function access_audit_members(array $config, $uid = 0)
 {
@@ -340,7 +357,8 @@ function access_audit_members(array $config, $uid = 0)
 
     $members = array();
     $query = $db->query("
-        SELECT u.uid, u.username, u.usergroup, u.additionalgroups, u.displaygroup, u.postnum, f.{$field} AS legion_id
+        SELECT u.uid, u.username, u.usergroup, u.additionalgroups, u.displaygroup, u.postnum, u.email,
+            f.ufid AS userfields_uid, f.{$field} AS legion_id
         FROM " . TABLE_PREFIX . "users u
         LEFT JOIN " . TABLE_PREFIX . "userfields f ON (f.ufid = u.uid)
         {$where}
@@ -348,7 +366,10 @@ function access_audit_members(array $config, $uid = 0)
     ");
     while($member = $db->fetch_array($query))
     {
+        $member['legion_id_stored'] = $member['legion_id'] === null ? null : (string)$member['legion_id'];
         $member['legion_id'] = trim((string)$member['legion_id']);
+        $member['has_userfields'] = $member['userfields_uid'] !== null;
+        unset($member['userfields_uid']);
         $members[] = $member;
     }
 
@@ -372,10 +393,12 @@ function access_audit_group_list($additionalgroups)
  * @param array $config As access_audit_config(), with nothing missing
  * @param array $members As access_audit_members()
  * @return array One entry per member, in access_audit_compare_results() order: 'member',
- *               'legion_number', 'record' (the 501st's, or null), 'verdict', 'plan' (as
- *               access_audit_plan(), or null when nothing should change or nothing can be
- *               said), and 'shared_with' (the other members among $members on the same
- *               Legion ID, each 'uid' and 'username')
+ *               'legion_number' (the Legion ID they are judged by, 0 for none),
+ *               'found_legion_id' (that number when it was found by their email address
+ *               rather than on their profile, otherwise 0), 'record' (the 501st's, or
+ *               null), 'verdict', 'plan' (as access_audit_plan(), or null when nothing
+ *               should change or nothing can be said), and 'shared_with' (the other members
+ *               among $members on the same Legion ID, each 'uid' and 'username')
  */
 function access_audit_evaluate(array $config, array $members)
 {
@@ -383,13 +406,34 @@ function access_audit_evaluate(array $config, array $members)
 
     $groups = (array)$cache->read('usergroups');
 
+    // A member with no Legion ID of their own is asked about by email address, and the
+    // Legion ID found, if any, looked up along with everybody else's.
     $numbers = array();
+    $emails = array();
     foreach($members as $member)
     {
+        if(access_audit_is_banned($member, $groups))
+        {
+            continue;
+        }
+
         $number = access_audit_legion_number($member['legion_id']);
-        if($number > 0 && !access_audit_is_banned($member, $groups))
+        if($number > 0)
         {
             $numbers[] = $number;
+        }
+        elseif(access_audit_normalise_email($member['email']) !== '')
+        {
+            $emails[] = access_audit_normalise_email($member['email']);
+        }
+    }
+
+    $found = access_audit_lookup_emails($emails);
+    foreach($found as $legion_id)
+    {
+        if($legion_id > 0)
+        {
+            $numbers[] = $legion_id;
         }
     }
 
@@ -399,6 +443,22 @@ function access_audit_evaluate(array $config, array $members)
     foreach($members as $member)
     {
         $number = access_audit_legion_number($member['legion_id']);
+        $found_legion_id = 0;
+        // Whether the email address was asked about and the API gave no answer, which says
+        // nothing about whether they have a Legion ID.
+        $email_unanswered = false;
+        if($number === 0 && !access_audit_is_banned($member, $groups))
+        {
+            $email = access_audit_normalise_email($member['email']);
+            if($email !== '' && !isset($found[$email]))
+            {
+                $email_unanswered = true;
+            }
+            elseif($email !== '' && $found[$email] > 0)
+            {
+                $number = $found_legion_id = $found[$email];
+            }
+        }
         $record = $number > 0 && isset($records[$number]) ? $records[$number] : null;
 
         // MyBB puts a banned member's groups back as they were when the ban is lifted, so
@@ -407,6 +467,11 @@ function access_audit_evaluate(array $config, array $members)
         if(access_audit_is_banned($member, $groups))
         {
             $verdict = ACCESS_AUDIT_BANNED;
+            $wanted = null;
+        }
+        elseif($email_unanswered)
+        {
+            $verdict = ACCESS_AUDIT_UNCHECKED;
             $wanted = null;
         }
         elseif($number === 0)
@@ -418,6 +483,14 @@ function access_audit_evaluate(array $config, array $members)
         {
             $verdict = ACCESS_AUDIT_UNCHECKED;
             $wanted = null;
+        }
+        elseif($record['status'] === ACCESS_AUDIT_RETIRED && (int)$record['garrison_id'] === (int)$config['unit'])
+        {
+            // No longer a 501st member, so out of every other group - the retired members
+            // group takes over as primary when the one they had is taken away. Another
+            // unit's retired members are no business of this unit's retired group.
+            $verdict = ACCESS_AUDIT_OUR_UNIT_RETIRED;
+            $wanted = array((int)$config['retired_group']);
         }
         elseif($record['status'] !== ACCESS_AUDIT_ACTIVE && $record['status'] !== ACCESS_AUDIT_RESERVE)
         {
@@ -457,15 +530,16 @@ function access_audit_evaluate(array $config, array $members)
             }
         }
 
-        $plan = $wanted === null ? null : access_audit_plan($member, $wanted, $config);
+        $plan = $wanted === null ? null : access_audit_plan($member, $wanted, $config, $found_legion_id);
 
         $results[] = array(
-            'member'        => $member,
-            'legion_number' => $number,
-            'record'        => $record,
-            'verdict'       => $verdict,
-            'plan'          => $plan && $plan['changed'] ? $plan : null,
-            'shared_with'   => array(),
+            'member'          => $member,
+            'legion_number'   => $number,
+            'found_legion_id' => $found_legion_id,
+            'record'          => $record,
+            'verdict'         => $verdict,
+            'plan'            => $plan && $plan['changed'] ? $plan : null,
+            'shared_with'     => array(),
         );
     }
 
@@ -473,6 +547,7 @@ function access_audit_evaluate(array $config, array $members)
     // another member's ID to get their access - which the 501st's record cannot tell apart,
     // since it answers for the ID and not the account. Each is noted with the others, and
     // banned accounts count: an ID shared with a banned account is how a ban gets dodged.
+    // A Legion ID found by email counts as much as one typed in.
     $holders = array();
     foreach($results as $index => $result)
     {
@@ -554,20 +629,24 @@ function access_audit_is_banned(array $member, array $groups)
  * Joining a group adds it to the member's additional groups. Leaving one takes it out of
  * them - or, when it is their primary group, which a member cannot be without, swaps it
  * for the first of the groups they belong in (gone from active to reserve in this unit: the
- * reserve members group; moved from this unit to another: the 501st members group), or for
- * Registered when they belong in none. A display group that is taken away goes back to
+ * reserve members group; retired from this unit: the retired members group; moved from
+ * this unit to another: the 501st members group), or for Registered when they belong in
+ * none. A display group that is taken away goes back to
  * showing the primary group.
  *
  * @param array $member As access_audit_members()
  * @param array $wanted The audited groups the member belongs in, the one to make primary
- *                      if need be first: none, the 501st members group, or it and one of
- *                      the unit's two - and a squad's group after those
+ *                      if need be first: none, the retired members group alone, the 501st
+ *                      members group, or it and the unit members or reserve members group -
+ *                      and a squad's group after those
  * @param array $config As access_audit_config()
+ * @param int $legion_id A Legion ID found by email to save to their profile; 0 for none
  * @return array 'usergroup', 'additionalgroups' (comma separated), 'displaygroup', 'add'
  *               and 'remove' (group ids), 'primary_from' and 'primary_to' (group ids, equal
- *               when the primary group stays), and 'changed'
+ *               when the primary group stays), 'legion_id', 'groups_changed', and 'changed'
+ *               (the groups, or a Legion ID to save)
  */
-function access_audit_plan(array $member, array $wanted, array $config)
+function access_audit_plan(array $member, array $wanted, array $config, $legion_id = 0)
 {
     $audited = access_audit_audited_groups($config);
     $wanted = array_values(array_intersect(array_map('intval', $wanted), $audited));
@@ -611,6 +690,8 @@ function access_audit_plan(array $member, array $wanted, array $config)
     $sorted_additional = $new_additional;
     sort($sorted_additional);
 
+    $groups_changed = $new_primary !== $primary || $sorted_additional !== $old_additional || $new_display !== $display;
+
     return array(
         'usergroup'        => $new_primary,
         'additionalgroups' => implode(',', $new_additional),
@@ -619,8 +700,61 @@ function access_audit_plan(array $member, array $wanted, array $config)
         'remove'           => $remove,
         'primary_from'     => $primary,
         'primary_to'       => $new_primary,
-        'changed'          => $new_primary !== $primary || $sorted_additional !== $old_additional || $new_display !== $display,
+        'legion_id'        => (int)$legion_id,
+        'groups_changed'   => $groups_changed,
+        'changed'          => $groups_changed || (int)$legion_id > 0,
     );
+}
+
+/**
+ * Save a Legion ID found by email to a member's profile.
+ *
+ * Guarded on the field as it was when the Legion ID was found, so one the member or
+ * another administrator has put there in the meantime is never overwritten.
+ *
+ * @param array $member As access_audit_members()
+ * @param int $legion_id
+ * @param array $config As access_audit_config()
+ * @return bool Whether it was saved
+ */
+function access_audit_save_legion_id(array $member, $legion_id, array $config)
+{
+    global $db;
+
+    $field = "fid" . (int)$config['field'];
+    $uid = (int)$member['uid'];
+
+    // MyBB gives every member a row when they register, but a board that has been through
+    // imports or merges can have members without one.
+    if(!$member['has_userfields'])
+    {
+        if($db->fetch_field($db->simple_select("userfields", "ufid", "ufid = {$uid}"), "ufid"))
+        {
+            return false;
+        }
+
+        // Every field, as MyBB's own user data handler does: its columns are NOT NULL with
+        // no default.
+        $row = array('ufid' => $uid);
+        $query = $db->simple_select("profilefields", "fid");
+        while($profile_field = $db->fetch_array($query))
+        {
+            $row["fid" . (int)$profile_field['fid']] = '';
+        }
+        $row[$field] = (string)(int)$legion_id;
+
+        $db->insert_query("userfields", $row);
+
+        return true;
+    }
+
+    $stored = $member['legion_id_stored'] === null
+        ? "{$field} IS NULL"
+        : "{$field} = '" . $db->escape_string($member['legion_id_stored']) . "'";
+
+    $db->update_query("userfields", array($field => (string)(int)$legion_id), "ufid = {$uid} AND {$stored}");
+
+    return $db->affected_rows() > 0;
 }
 
 /**
@@ -651,7 +785,8 @@ function access_audit_apply(array $member, array $plan)
 }
 
 /**
- * A plan, in words: "Add to Garrison Members; remove from 501st Members".
+ * A plan, in words: "Set Legion ID to 12345; Add to Garrison Members; Remove from 501st
+ * Members".
  *
  * @param array $plan As access_audit_plan()
  * @param bool $html Whether to escape the group names for a page
@@ -662,6 +797,10 @@ function access_audit_describe_plan(array $plan, $html = true)
     global $lang;
 
     $parts = array();
+    if($plan['legion_id'] > 0)
+    {
+        $parts[] = $lang->sprintf($lang->access_audit_change_legion_id, (int)$plan['legion_id']);
+    }
     foreach($plan['add'] as $gid)
     {
         $parts[] = $lang->sprintf($lang->access_audit_change_add, access_audit_group_name($gid, $html));

@@ -57,6 +57,7 @@ export interface Fixtures {
 		unit: number;
 		legion: number;
 		reserve: number;
+		retired: number;
 		command: number;
 		squad: number;
 		otherSquad: number;
@@ -143,9 +144,11 @@ export async function resetBoardState(): Promise<void> {
 	);
 
 	// Absent only while plugin-setup has the plugin uninstalled.
-	const [tables] = await conn.query(`SHOW TABLES LIKE '${T('access_audit_lookups')}'`);
-	if ((tables as unknown[]).length > 0) {
-		await conn.query(`DELETE FROM ${T('access_audit_lookups')}`);
+	for (const table of ['access_audit_lookups', 'access_audit_email_lookups']) {
+		const [tables] = await conn.query(`SHOW TABLES LIKE '${T(table)}'`);
+		if ((tables as unknown[]).length > 0) {
+			await conn.query(`DELETE FROM ${T(table)}`);
+		}
 	}
 
 	await conn.query(`TRUNCATE TABLE ${T('adminlog')}`);
@@ -200,6 +203,15 @@ export async function setGroups(
 		`UPDATE ${T('users')} SET usergroup = ?, additionalgroups = ?, displaygroup = ? WHERE uid = ?`,
 		[usergroup, additionalgroups.join(','), displaygroup, uid(username)]
 	);
+}
+
+/** What a member's Legion ID field holds, or null when it is NULL or they have no row. */
+export async function getLegionId(username: string): Promise<string | null> {
+	const row = await queryOne<RowDataPacket>(
+		`SELECT fid${fixtures().profileFields.legion_id} AS legion_id FROM ${T('userfields')} WHERE ufid = ?`,
+		[uid(username)]
+	);
+	return row ? (row.legion_id as string | null) : null;
 }
 
 /** Change what a member has typed in their Legion ID field. */

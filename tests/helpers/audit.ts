@@ -22,7 +22,7 @@ export async function openAudit(page: Page, { all = false } = {}): Promise<void>
 /** The summary's counts. */
 export async function counts(page: Page): Promise<Record<string, number>> {
 	const result: Record<string, number> = {};
-	for (const key of ['checked', 'ok', 'fix', 'unchecked', 'banned', 'shared']) {
+	for (const key of ['checked', 'ok', 'fix', 'unchecked', 'banned', 'shared', 'found']) {
 		result[key] = Number(await page.locator(`#access_audit_count_${key}`).innerText());
 	}
 	return result;

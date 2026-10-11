@@ -20,6 +20,7 @@ function access_audit_plugin_tables()
 {
     return array(
         'access_audit_lookups',
+        'access_audit_email_lookups',
         'access_audit_schema_upgrades'
     );
 }
@@ -250,6 +251,16 @@ function access_audit_install_settings()
             "optionscode" => "textarea",
             "value"       => "",
             "disporder"   => 8,
+        ),
+        // Last for the same reason as the reserve members group: 1 to 8 are taken on a
+        // board that had the plugin before it.
+        array(
+            "name"        => "access_audit_retired_group",
+            "title"       => "Retired Members Group",
+            "description" => "Retired members of this unit belong in this group, and in none of the others.",
+            "optionscode" => "groupselectsingle",
+            "value"       => "",
+            "disporder"   => 9,
         ),
     );
 

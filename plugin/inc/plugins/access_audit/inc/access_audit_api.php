@@ -2,11 +2,12 @@
 /**
  * MyBB Access Audit Plugin - The 501st Legion's API
  *
- * Three calls: /garrisons and /squads, the lists of units (garrisons and outposts) and of
- * squads the Settings tab picks from, and /legionId/{id}, one member's record. The record
- * is what the audit judges a member by: memberStatus, garrisonId for which unit they belong
- * to, and squadId for which squad, if any. The list of squads does not say which unit each
- * is in, so that comes from their officers' records (see access_audit_api_squads()).
+ * Four calls: /garrisons and /squads, the lists of units (garrisons and outposts) and of
+ * squads the Settings tab picks from, /legionId/{id}, one member's record, and
+ * /email/{email}, the Legion ID of the member with that email address. The record is what
+ * the audit judges a member by: memberStatus, garrisonId for which unit they belong to, and
+ * squadId for which squad, if any. The list of squads does not say which unit each is in,
+ * so that comes from their officers' records (see access_audit_api_squads()).
  *
  * The API answers a member who has made their record private and an ID nobody holds the
  * same way: 200, with nothing but {"memberStatus": "Classified Record"}. Members who have
@@ -341,32 +342,35 @@ function access_audit_api_parse_member(array $data)
 }
 
 /**
- * Fetch member records from the API, several at a time.
+ * GET several paths of the API, several at a time.
  *
- * @param array $legion_ids Of int
+ * @param array $paths key => path from the base, starting with a slash
  * @param string|null $base As access_audit_api_base()
- * @return array legion id => record (as access_audit_api_parse_member()), for the IDs the
- *               API answered; an ID it did not answer is missing
+ * @return array key => decoded response (as access_audit_api_decode()), for the paths the
+ *               API answered; a path it did not answer is missing
  */
-function access_audit_api_fetch_members(array $legion_ids, $base = null)
+function access_audit_api_fetch_many(array $paths, $base = null)
 {
     $base = access_audit_api_base($base);
-    if($base === '' || !access_audit_valid_api_url($base) || !function_exists('curl_multi_init') || !$legion_ids)
+    if($base === '' || !access_audit_valid_api_url($base) || !function_exists('curl_multi_init') || !$paths)
     {
         return array();
     }
 
     $results = array();
-    $pending = array_values(array_unique(array_map('intval', $legion_ids)));
+    $pending = $paths;
     $multi = curl_multi_init();
     $running_handles = array();
 
     $start_next = function() use (&$pending, &$running_handles, $multi, $base)
     {
-        $legion_id = array_shift($pending);
-        $ch = access_audit_api_handle($base . '/legionId/' . $legion_id);
+        // Not array_shift(), which would renumber Legion IDs used as keys.
+        reset($pending);
+        $key = key($pending);
+        $ch = access_audit_api_handle($base . $pending[$key]);
+        unset($pending[$key]);
         curl_multi_add_handle($multi, $ch);
-        $running_handles[(int)$legion_id] = $ch;
+        $running_handles[$key] = $ch;
     };
 
     while($pending && count($running_handles) < ACCESS_AUDIT_API_CONCURRENCY)
@@ -385,9 +389,9 @@ function access_audit_api_fetch_members(array $legion_ids, $base = null)
         while($done = curl_multi_info_read($multi))
         {
             $ch = $done['handle'];
-            $legion_id = array_search($ch, $running_handles, true);
+            $key = array_search($ch, $running_handles, true);
 
-            if($legion_id !== false)
+            if($key !== false)
             {
                 $data = $done['result'] === CURLE_OK
                     ? access_audit_api_decode(curl_multi_getcontent($ch), (int)curl_getinfo($ch, CURLINFO_HTTP_CODE))
@@ -395,10 +399,10 @@ function access_audit_api_fetch_members(array $legion_ids, $base = null)
 
                 if($data !== null)
                 {
-                    $results[(int)$legion_id] = access_audit_api_parse_member($data);
+                    $results[$key] = $data;
                 }
 
-                unset($running_handles[$legion_id]);
+                unset($running_handles[$key]);
             }
 
             curl_multi_remove_handle($multi, $ch);
@@ -421,6 +425,82 @@ function access_audit_api_fetch_members(array $legion_ids, $base = null)
     curl_multi_close($multi);
 
     return $results;
+}
+
+/**
+ * Fetch member records from the API, several at a time.
+ *
+ * @param array $legion_ids Of int
+ * @param string|null $base As access_audit_api_base()
+ * @return array legion id => record (as access_audit_api_parse_member()), for the IDs the
+ *               API answered; an ID it did not answer is missing
+ */
+function access_audit_api_fetch_members(array $legion_ids, $base = null)
+{
+    $paths = array();
+    foreach(array_unique(array_map('intval', $legion_ids)) as $legion_id)
+    {
+        $paths[$legion_id] = '/legionId/' . $legion_id;
+    }
+
+    $records = array();
+    foreach(access_audit_api_fetch_many($paths, $base) as $legion_id => $data)
+    {
+        $records[(int)$legion_id] = access_audit_api_parse_member($data);
+    }
+
+    return $records;
+}
+
+/**
+ * The Legion ID an /email/{email} response gives.
+ *
+ * The API answers an address no approved member has with {"error": "..."}, and one that
+ * an approved member has - as their primary or secondary address - with {"legionId": n}.
+ *
+ * @param array $data
+ * @return int|null The Legion ID; 0 for no match; null when the answer is neither
+ */
+function access_audit_api_parse_email(array $data)
+{
+    if(isset($data['legionId']))
+    {
+        $legion_id = is_int($data['legionId']) || (is_string($data['legionId']) && ctype_digit($data['legionId']))
+            ? access_audit_legion_number((string)$data['legionId'])
+            : 0;
+
+        return $legion_id > 0 ? $legion_id : null;
+    }
+
+    return isset($data['error']) && is_string($data['error']) ? 0 : null;
+}
+
+/**
+ * Look email addresses up on the API, several at a time.
+ *
+ * @param array $emails Of string, as access_audit_normalise_email()
+ * @return array email => Legion ID (0 for no match), for the addresses the API answered;
+ *               one it did not answer is missing
+ */
+function access_audit_api_fetch_emails(array $emails)
+{
+    $paths = array();
+    foreach(array_unique($emails) as $email)
+    {
+        $paths[$email] = '/email/' . rawurlencode($email);
+    }
+
+    $found = array();
+    foreach(access_audit_api_fetch_many($paths) as $email => $data)
+    {
+        $legion_id = access_audit_api_parse_email($data);
+        if($legion_id !== null)
+        {
+            $found[(string)$email] = $legion_id;
+        }
+    }
+
+    return $found;
 }
 
 /**
@@ -498,6 +578,79 @@ function access_audit_lookup_members(array $legion_ids, $base = null)
 }
 
 /**
+ * An email address as it is looked up: trimmed and in lower case, or '' when it is not an
+ * address at all.
+ *
+ * @param string $email
+ * @return string
+ */
+function access_audit_normalise_email($email)
+{
+    $email = strtolower(trim((string)$email));
+
+    return $email !== '' && validate_email_format($email) ? $email : '';
+}
+
+/**
+ * The Legion IDs of the members with these email addresses: from the email lookups table
+ * when they were asked about recently, otherwise from the API, keeping what it answers.
+ *
+ * The table holds a hash of each address rather than the address, so the plugin keeps no
+ * copy of members' addresses of its own.
+ *
+ * @param array $emails Of string, as access_audit_normalise_email()
+ * @return array email => Legion ID (0 for no match); an address neither had is missing
+ */
+function access_audit_lookup_emails(array $emails)
+{
+    global $db;
+
+    $hashes = array();
+    foreach(array_filter(array_unique($emails), 'strlen') as $email)
+    {
+        $hashes[sha1($email)] = $email;
+    }
+    if(!$hashes)
+    {
+        return array();
+    }
+
+    $found = array();
+    $fresh_since = TIME_NOW - ACCESS_AUDIT_LOOKUP_TTL;
+
+    foreach(array_chunk(array_keys($hashes), 500) as $chunk)
+    {
+        $query = $db->simple_select("access_audit_email_lookups", "email_hash, legion_id",
+            "email_hash IN ('" . implode("','", $chunk) . "') AND fetched_at >= " . (int)$fresh_since);
+        while($row = $db->fetch_array($query))
+        {
+            $found[$hashes[$row['email_hash']]] = (int)$row['legion_id'];
+        }
+    }
+
+    $missing = array_values(array_diff($hashes, array_keys($found)));
+    if(!$missing)
+    {
+        return $found;
+    }
+
+    @set_time_limit(0);
+
+    foreach(access_audit_api_fetch_emails($missing) as $email => $legion_id)
+    {
+        $found[$email] = $legion_id;
+
+        $db->replace_query("access_audit_email_lookups", array(
+            'email_hash' => $db->escape_string(sha1($email)),
+            'legion_id'  => (int)$legion_id,
+            'fetched_at' => TIME_NOW,
+        ));
+    }
+
+    return $found;
+}
+
+/**
  * Forget every kept answer, so the next audit asks the API about everybody.
  */
 function access_audit_forget_lookups()
@@ -505,6 +658,7 @@ function access_audit_forget_lookups()
     global $db;
 
     $db->delete_query("access_audit_lookups");
+    $db->delete_query("access_audit_email_lookups");
 }
 
 /**
@@ -516,8 +670,16 @@ function access_audit_oldest_lookup()
 {
     global $db;
 
-    $oldest = $db->fetch_field($db->simple_select("access_audit_lookups", "MIN(fetched_at) AS oldest",
-        "fetched_at >= " . (int)(TIME_NOW - ACCESS_AUDIT_LOOKUP_TTL)), "oldest");
+    $times = array();
+    foreach(array("access_audit_lookups", "access_audit_email_lookups") as $table)
+    {
+        $oldest = $db->fetch_field($db->simple_select($table, "MIN(fetched_at) AS oldest",
+            "fetched_at >= " . (int)(TIME_NOW - ACCESS_AUDIT_LOOKUP_TTL)), "oldest");
+        if($oldest)
+        {
+            $times[] = (int)$oldest;
+        }
+    }
 
-    return $oldest ? (int)$oldest : null;
+    return $times ? min($times) : null;
 }

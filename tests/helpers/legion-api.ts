@@ -6,8 +6,9 @@ import { FORUM_DIR, REPO_ROOT } from './config';
  * The 501st Legion API stand-in (tests/stubs/legion-api.php).
  *
  * Provisioning points access_audit_api_url at it, so the plugin never reaches the real
- * API from the suite. Every test starts with the list of units below and no member
- * stubbed: a Legion ID with no answer gets a 503, the API being down.
+ * API from the suite. Every test starts with the list of units below, no member stubbed,
+ * and no email address matching anybody: a Legion ID with no answer gets a 503, the API
+ * being down, and an email address with none of its own gets no match.
  */
 const STUB_FILE = path.join(FORUM_DIR, 'e2e-legion-api.php');
 const STUB_DIR = path.join(FORUM_DIR, 'e2e-legion-api');
@@ -79,8 +80,8 @@ export function installLegionApiStub(): void {
 }
 
 /**
- * Back to the stock lists of units and squads, their officers and no members, and forget
- * every logged request.
+ * Back to the stock lists of units and squads, their officers, no members and no email
+ * address matching anybody, and forget every logged request.
  */
 export function resetLegionApiStub(): void {
 	fs.rmSync(STUB_DIR, { recursive: true, force: true });
@@ -90,6 +91,7 @@ export function resetLegionApiStub(): void {
 	stubUnits({ body: { garrisons: UNITS } });
 	stubSquads({ body: { squad: SQUADS } });
 	stubSquadOfficers();
+	stubEmails(NO_EMAIL_MATCH);
 }
 
 /** Say what /garrisons answers. */
@@ -121,6 +123,32 @@ export function stubLegionApi(legionId: number, response: LegionApiResponse): vo
 export function unstubLegionApi(legionId: number): void {
 	fs.rmSync(path.join(STUB_DIR, `${legionId}.json`), { force: true });
 }
+
+/** Say what /email/{email} answers for one address. */
+export function stubEmail(email: string, response: LegionApiResponse): void {
+	fs.writeFileSync(
+		path.join(STUB_DIR, `email-${email.toLowerCase()}.json`),
+		JSON.stringify(response)
+	);
+}
+
+/** Say what /email/{email} answers for every address without an answer of its own. */
+export function stubEmails(response: LegionApiResponse): void {
+	fs.writeFileSync(path.join(STUB_DIR, 'email.json'), JSON.stringify(response));
+}
+
+/** Make /email/{email} answer 503 for every address without an answer of its own. */
+export function emailsDown(): void {
+	fs.rmSync(path.join(STUB_DIR, 'email.json'), { force: true });
+}
+
+/** What /email/{email} answers for an approved member's address. */
+export const emailMatch = (legionId: number): LegionApiResponse => ({ body: { legionId } });
+
+/** What /email/{email} answers for an address no approved member has. */
+export const NO_EMAIL_MATCH: LegionApiResponse = {
+	body: { error: 'No Match found as an Active Member' },
+};
 
 /** A public member record, shaped as the real /legionId/{id} returns one. */
 export function legionApiMember(
@@ -184,4 +212,9 @@ export function legionApiRequests(): string[] {
 /** The member lookups among them, the squad officers' included. */
 export function memberRequests(): string[] {
 	return legionApiRequests().filter((request) => request.startsWith('/legionId/'));
+}
+
+/** The email address lookups among them. */
+export function emailRequests(): string[] {
+	return legionApiRequests().filter((request) => request.startsWith('/email/'));
 }

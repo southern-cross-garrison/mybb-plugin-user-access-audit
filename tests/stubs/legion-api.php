@@ -1,16 +1,16 @@
 <?php
 /**
- * A stand-in for the 501st Legion API's /garrisons, /squads and /legionId/{id}, for the e2e
- * suite.
+ * A stand-in for the 501st Legion API's /garrisons, /squads, /legionId/{id} and
+ * /email/{email}, for the e2e suite.
  *
  * Global setup copies this to the forum root, and provisioning points the
  * access_audit_api_url setting at it, so no test ever reaches the real API. A test says
  * what the API answers by writing a file into e2e-legion-api/ beside it
  * (tests/helpers/legion-api.ts): garrisons.json for the list of units, squads.json for the
  * list of squads, <id>.json for one
- * Legion ID, each {"status": 200, "body": {...}} or {"raw": "..."}. Anything with no file
- * answers 503, the API being down. Every request is appended to
- * e2e-legion-api/requests.log.
+ * Legion ID, email-<address>.json for one email address and email.json for any other, each
+ * {"status": 200, "body": {...}} or {"raw": "..."}. Anything with no file answers 503, the
+ * API being down. Every request is appended to e2e-legion-api/requests.log.
  */
 $dir = __DIR__ . '/e2e-legion-api';
 $path = isset($_SERVER['PATH_INFO']) ? $_SERVER['PATH_INFO'] : '';
@@ -32,6 +32,14 @@ elseif($path === '/squads')
 elseif(preg_match('#^/legionId/(\d+)$#', $path, $match))
 {
     $file = $dir . '/' . $match[1] . '.json';
+}
+elseif(preg_match('#^/email/([a-z0-9@._+-]+)$#i', $path, $match))
+{
+    $file = $dir . '/email-' . strtolower($match[1]) . '.json';
+    if(!is_file($file))
+    {
+        $file = $dir . '/email.json';
+    }
 }
 
 $response = $file !== null && is_file($file) ? json_decode(file_get_contents($file), true) : null;

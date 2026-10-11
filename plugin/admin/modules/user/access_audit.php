@@ -113,17 +113,40 @@ if($action == "fix")
         admin_redirect($audit_url);
     }
 
-    if(!access_audit_apply($member, $result['plan']))
+    $plan = $result['plan'];
+
+    // The Legion ID found by email first: the groups were worked out from it, so they are
+    // only changed once it is on the member's profile to say why.
+    if($plan['legion_id'] > 0 && !access_audit_save_legion_id($member, $plan['legion_id'], $config))
     {
-        flash_message($lang->sprintf($lang->access_audit_error_changed, $username), 'error');
+        flash_message($lang->sprintf($lang->access_audit_error_legion_id_changed, $username), 'error');
         admin_redirect($audit_url);
     }
 
-    $cache->update_moderators();
+    if($plan['groups_changed'])
+    {
+        if(!access_audit_apply($member, $plan))
+        {
+            if($plan['legion_id'] > 0)
+            {
+                // The Legion ID is saved, and is the member's whatever their groups are, so
+                // that much is logged and said.
+                log_admin_action((int)$member['uid'], $member['username'], $lang->sprintf($lang->access_audit_change_legion_id, $plan['legion_id']));
+                flash_message($lang->sprintf($lang->access_audit_error_changed_after_legion_id, $username, $plan['legion_id']), 'error');
+            }
+            else
+            {
+                flash_message($lang->sprintf($lang->access_audit_error_changed, $username), 'error');
+            }
+            admin_redirect($audit_url);
+        }
 
-    log_admin_action((int)$member['uid'], $member['username'], access_audit_describe_plan($result['plan'], false));
+        $cache->update_moderators();
+    }
 
-    flash_message($lang->sprintf($lang->access_audit_fixed, $username, access_audit_describe_plan($result['plan'])), 'success');
+    log_admin_action((int)$member['uid'], $member['username'], access_audit_describe_plan($plan, false));
+
+    flash_message($lang->sprintf($lang->access_audit_fixed, $username, access_audit_describe_plan($plan)), 'success');
     admin_redirect($audit_url);
 }
 
@@ -161,6 +184,7 @@ if($action == "settings")
         'field'         => (int)access_audit_setting('legion_id_field'),
         'unit_group'    => (int)access_audit_setting('unit_group'),
         'reserve_group' => (int)access_audit_setting('reserve_group'),
+        'retired_group' => (int)access_audit_setting('retired_group'),
         'legion_group'  => (int)access_audit_setting('legion_group'),
         'squads'        => array_values($saved_squads),
     );
@@ -173,6 +197,7 @@ if($action == "settings")
             'field'         => $mybb->get_input('legion_id_field', MyBB::INPUT_INT),
             'unit_group'    => $mybb->get_input('unit_group', MyBB::INPUT_INT),
             'reserve_group' => $mybb->get_input('reserve_group', MyBB::INPUT_INT),
+            'retired_group' => $mybb->get_input('retired_group', MyBB::INPUT_INT),
             'legion_group'  => $mybb->get_input('legion_group', MyBB::INPUT_INT),
             'squads'        => array(),
         );
@@ -276,12 +301,17 @@ if($action == "settings")
             $errors[] = $lang->access_audit_error_reserve_group;
         }
 
+        if(!isset($groups[$values['retired_group']]))
+        {
+            $errors[] = $lang->access_audit_error_retired_group;
+        }
+
         if(!isset($groups[$values['legion_group']]))
         {
             $errors[] = $lang->access_audit_error_legion_group;
         }
 
-        $core_groups = array($values['unit_group'], $values['reserve_group'], $values['legion_group']);
+        $core_groups = array($values['unit_group'], $values['reserve_group'], $values['retired_group'], $values['legion_group']);
         if(!access_audit_groups_distinct($core_groups))
         {
             $errors[] = $lang->access_audit_error_same_group;
@@ -353,6 +383,7 @@ if($action == "settings")
                 'access_audit_legion_id_field' => (string)$values['field'],
                 'access_audit_unit_group'      => (string)$values['unit_group'],
                 'access_audit_reserve_group'   => (string)$values['reserve_group'],
+                'access_audit_retired_group'   => (string)$values['retired_group'],
                 'access_audit_legion_group'    => (string)$values['legion_group'],
                 'access_audit_squads'          => access_audit_encode_squads(array_values($chosen_squads)),
             );
@@ -447,6 +478,13 @@ if($action == "settings")
     );
 
     $container->output_row(
+        $lang->access_audit_setting_retired_group . " <em>*</em>",
+        $lang->access_audit_setting_retired_group_desc,
+        $form->generate_select_box('retired_group', $group_options, $values['retired_group'], array('id' => 'retired_group')),
+        'retired_group'
+    );
+
+    $container->output_row(
         $lang->access_audit_setting_legion_group . " <em>*</em>",
         $lang->access_audit_setting_legion_group_desc,
         $form->generate_select_box('legion_group', $group_options, $values['legion_group'], array('id' => 'legion_group')),
@@ -483,38 +521,40 @@ if($action == "settings")
         $squad_rows[$id]['group'] = $squad_row['group'];
     }
 
-    $squad_table = new Table;
-    $squad_table->construct_header($lang->access_audit_col_squad, array('width' => '50%'));
-    $squad_table->construct_header($lang->access_audit_col_squad_group, array('width' => '50%'));
+    // A unit the 501st's records show no squads in has nothing to choose here, so the table
+    // is left out - unless a squad still has a group, which has to be seen to be taken off.
+    $unit_has_no_squads = $squads !== null && $values['unit'] > 0 && !$squad_rows;
+    if(!$unit_has_no_squads)
+    {
+        $squad_table = new Table;
+        $squad_table->construct_header($lang->access_audit_col_squad, array('width' => '50%'));
+        $squad_table->construct_header($lang->access_audit_col_squad_group, array('width' => '50%'));
 
-    $squad_note = '';
-    if($squads === null)
-    {
-        $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_unavailable\">{$lang->access_audit_squads_unavailable}</div>";
-    }
-    elseif($values['unit'] <= 0)
-    {
-        $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_no_unit\">{$lang->access_audit_squads_no_unit}</div>";
-    }
-    elseif(!$squads)
-    {
-        $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_none\">{$lang->access_audit_squads_none}</div>";
-    }
-    $squad_table->construct_cell($squad_note . $lang->access_audit_squads_desc, array('colspan' => 2));
-    $squad_table->construct_row();
-
-    foreach($squad_rows as $id => $squad_row)
-    {
-        $name = "<label for=\"squad_group_{$id}\">" . htmlspecialchars_uni($squad_row['name']) . "</label>";
-        if($squad_row['other'])
+        $squad_note = '';
+        if($squads === null)
         {
-            $name .= " <span class=\"access-audit-muted\">{$lang->access_audit_squad_not_unit}</span>";
+            $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_unavailable\">{$lang->access_audit_squads_unavailable}</div>";
         }
-        $squad_table->construct_cell($name);
-        $squad_table->construct_cell($form->generate_select_box("squad_group[{$id}]", $group_options, $squad_row['group'], array('id' => "squad_group_{$id}")));
-        $squad_table->construct_row(array('class' => 'access-audit-squad-row', 'id' => "squad_{$id}"));
+        elseif($values['unit'] <= 0)
+        {
+            $squad_note = "<div class=\"access-audit-warning\" id=\"access_audit_squads_no_unit\">{$lang->access_audit_squads_no_unit}</div>";
+        }
+        $squad_table->construct_cell($squad_note . $lang->access_audit_squads_desc, array('colspan' => 2));
+        $squad_table->construct_row();
+
+        foreach($squad_rows as $id => $squad_row)
+        {
+            $name = "<label for=\"squad_group_{$id}\">" . htmlspecialchars_uni($squad_row['name']) . "</label>";
+            if($squad_row['other'])
+            {
+                $name .= " <span class=\"access-audit-muted\">{$lang->access_audit_squad_not_unit}</span>";
+            }
+            $squad_table->construct_cell($name);
+            $squad_table->construct_cell($form->generate_select_box("squad_group[{$id}]", $group_options, $squad_row['group'], array('id' => "squad_group_{$id}")));
+            $squad_table->construct_row(array('class' => 'access-audit-squad-row', 'id' => "squad_{$id}"));
+        }
+        $squad_table->output($lang->access_audit_squads);
     }
-    $squad_table->output($lang->access_audit_squads);
 
     $form->output_submit_wrapper(array($form->generate_submit_button($lang->access_audit_save_settings, array('id' => 'access_audit_save_settings'))));
     $form->end();
@@ -551,13 +591,17 @@ if(!$action)
 
     $results = access_audit_evaluate($config, access_audit_members($config));
 
-    $counts = array('checked' => count($results), 'ok' => 0, 'fix' => 0, 'unchecked' => 0, 'banned' => 0, 'shared' => 0);
+    $counts = array('checked' => count($results), 'ok' => 0, 'fix' => 0, 'unchecked' => 0, 'banned' => 0, 'shared' => 0, 'found' => 0);
     foreach($results as $result)
     {
         // Counted on top of whatever else is said about the member.
         if($result['shared_with'])
         {
             $counts['shared']++;
+        }
+        if($result['found_legion_id'] > 0)
+        {
+            $counts['found']++;
         }
 
         if($result['verdict'] === ACCESS_AUDIT_BANNED)
@@ -585,18 +629,20 @@ if(!$action)
         $unit_name,
         access_audit_group_name($config['unit_group']),
         access_audit_group_name($config['legion_group']),
-        access_audit_group_name($config['reserve_group']));
+        access_audit_group_name($config['reserve_group']),
+        access_audit_group_name($config['retired_group']));
     foreach($config['squads'] as $squad)
     {
         $rules .= ' ' . $lang->sprintf($lang->access_audit_summary_squad,
             htmlspecialchars_uni(access_audit_squad_name($squad)),
             access_audit_group_name($squad['group']));
     }
+    $rules .= ' ' . $lang->access_audit_summary_email;
 
     $summary = new Table;
     $summary->construct_cell($rules, array('colspan' => 2, 'id' => 'access_audit_rules'));
     $summary->construct_row();
-    foreach(array('checked', 'ok', 'fix', 'unchecked', 'banned', 'shared') as $key)
+    foreach(array('checked', 'ok', 'fix', 'unchecked', 'banned', 'shared', 'found') as $key)
     {
         $label = "access_audit_count_{$key}";
         $summary->construct_cell($lang->$label, array('width' => '30%'));
@@ -671,8 +717,20 @@ if(!$action)
 
         // As the member typed it, linked to their record on 501st.com by the number it was
         // read as, so whoever acts on the row can look at the record first - and a mistyped
-        // ID is one click from showing whose it really is. Nothing to link without a number.
-        if($member['legion_id'] === '')
+        // ID is one click from showing whose it really is. Nothing to link without a number,
+        // unless one was found by their email address, which is linked beneath.
+        if($result['found_legion_id'] > 0)
+        {
+            $found = (int)$result['found_legion_id'];
+            $legion_id_html = ($member['legion_id'] === ''
+                    ? "<span class=\"access-audit-muted\">{$lang->access_audit_none}</span>"
+                    : htmlspecialchars_uni($member['legion_id']))
+                . "<div class=\"access-audit-found smalltext\">"
+                . $lang->sprintf($lang->access_audit_found_by_email,
+                    "<a href=\"https://501st.com/member/{$found}\" target=\"_blank\" rel=\"noopener noreferrer\">{$found}</a>")
+                . "</div>";
+        }
+        elseif($member['legion_id'] === '')
         {
             $legion_id_html = "<span class=\"access-audit-muted\">{$lang->access_audit_none}</span>";
         }
@@ -764,6 +822,10 @@ if(!$action)
         if($result['shared_with'])
         {
             $classes[] = 'access-audit-shared-id';
+        }
+        if($result['found_legion_id'] > 0)
+        {
+            $classes[] = 'access-audit-found-id';
         }
         $table->construct_row(array('id' => "access_audit_row_{$uid}", 'class' => implode(' ', $classes)));
     }

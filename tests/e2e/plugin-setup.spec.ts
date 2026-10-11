@@ -21,6 +21,7 @@ const SETTINGS = [
 	'access_audit_legion_group',
 	'access_audit_reserve_group',
 	'access_audit_squads',
+	'access_audit_retired_group',
 ];
 
 const pluginRow = (page: Page) =>
@@ -66,8 +67,9 @@ test.beforeEach(async ({ page }) => {
 	await loginToAdminCp(page);
 });
 
-test('is installed with its table and settings', async ({ page }) => {
+test('is installed with its tables and settings', async ({ page }) => {
 	expect(await tableExists('access_audit_lookups')).toBe(true);
+	expect(await tableExists('access_audit_email_lookups')).toBe(true);
 	expect(await settingNames()).toEqual(SETTINGS);
 
 	await page.goto('/admin/index.php?module=config-settings');
@@ -116,6 +118,35 @@ test.describe('the schema', () => {
 			await reinstall();
 		}
 		expect(await columnNames('access_audit_lookups')).not.toContain('profile_url');
+	});
+});
+
+test.describe('the email lookups upgrade', () => {
+	const ADD_EMAIL_LOOKUPS = '0003_add_email_lookups';
+
+	test('adds the table to a board that does not have it, by reactivating', async ({ page }) => {
+		// The board as a release from before email lookups left it.
+		await execute(`DROP TABLE ${T('access_audit_email_lookups')}`);
+		await execute(`DELETE FROM ${T('access_audit_schema_upgrades')} WHERE name = ?`, [
+			ADD_EMAIL_LOOKUPS,
+		]);
+		try {
+			await clickPluginLink(page, 'Deactivate');
+			await clickPluginLink(page, 'Activate');
+
+			expect(await columnNames('access_audit_email_lookups')).toEqual([
+				'email_hash',
+				'legion_id',
+				'fetched_at',
+			]);
+		} finally {
+			// Run again, as after a failure part way: it has to be safe either way.
+			await execute(`DELETE FROM ${T('access_audit_schema_upgrades')} WHERE name = ?`, [
+				ADD_EMAIL_LOOKUPS,
+			]);
+			await reinstall();
+		}
+		expect(await tableExists('access_audit_email_lookups')).toBe(true);
 	});
 });
 
@@ -176,25 +207,25 @@ test.describe('the squad upgrade', () => {
 test('adds a setting new since an earlier release by reactivating, and the audit asks for it', async ({
 	page,
 }) => {
-	// The board as a release from before the reserve members group left it.
-	await execute(`DELETE FROM ${T('settings')} WHERE name = 'access_audit_reserve_group'`);
+	// The board as a release from before the retired members group left it.
+	await execute(`DELETE FROM ${T('settings')} WHERE name = 'access_audit_retired_group'`);
 	await runPhp('rebuild_settings();');
 	try {
 		await clickPluginLink(page, 'Deactivate');
 		await clickPluginLink(page, 'Activate');
 
 		expect(await settingNames()).toEqual(SETTINGS);
-		expect(await getSetting('access_audit_reserve_group')).toBe('');
+		expect(await getSetting('access_audit_retired_group')).toBe('');
 		// The others are kept as they were.
 		expect(await getSetting('access_audit_unit_group')).toBe(String(fixtures().groups.unit));
 
 		await gotoAudit(page);
 		await expect(page.locator('#access_audit_not_configured li')).toHaveText([
-			'Reserve members group',
+			'Retired members group',
 		]);
 	} finally {
 		await reinstall();
-		await setSettings({ access_audit_reserve_group: String(fixtures().groups.reserve) });
+		await setSettings({ access_audit_retired_group: String(fixtures().groups.retired) });
 	}
 });
 
@@ -235,6 +266,7 @@ test("leaves nothing behind when uninstalled, and members' groups as they are", 
 		await clickPluginLink(page, 'Uninstall');
 
 		expect(await tableExists('access_audit_lookups')).toBe(false);
+		expect(await tableExists('access_audit_email_lookups')).toBe(false);
 		expect(await tableExists('access_audit_schema_upgrades')).toBe(false);
 		expect(await settingNames()).toEqual([]);
 		expect(

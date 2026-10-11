@@ -23,7 +23,7 @@ import {
 
 /**
  * Users & Groups -> Access Audit -> Settings: the unit, picked from the 501st API's list;
- * the Legion ID profile field; the three groups the audit manages; and the squads, a row for
+ * the Legion ID profile field; the four groups the audit manages; and the squads, a row for
  * each of the unit's in the API's list, each given a group of its own.
  */
 const save = (page: import('@playwright/test').Page) =>
@@ -82,6 +82,7 @@ test("offers the board's profile fields and groups", async ({ page }) => {
 	);
 	await expect(page.locator('#unit_group')).toHaveValue(String(fixtures().groups.unit));
 	await expect(page.locator('#reserve_group')).toHaveValue(String(fixtures().groups.reserve));
+	await expect(page.locator('#retired_group')).toHaveValue(String(fixtures().groups.retired));
 	await expect(page.locator('#legion_group')).toHaveValue(String(fixtures().groups.legion));
 	await expect(page.locator('#unit_group option', { hasText: 'Command Staff' })).toHaveCount(1);
 });
@@ -94,6 +95,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 	await page.locator('#legion_id_field').selectOption(String(fixtures().profileFields.costumes));
 	await page.locator('#unit_group').selectOption(String(fixtures().groups.command));
 	await page.locator('#reserve_group').selectOption(String(fixtures().groups.legion));
+	await page.locator('#retired_group').selectOption(String(fixtures().groups.reserve));
 	await page.locator('#legion_group').selectOption(String(fixtures().groups.unit));
 	await save(page);
 
@@ -105,6 +107,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 	);
 	expect(await getSetting('access_audit_unit_group')).toBe(String(fixtures().groups.command));
 	expect(await getSetting('access_audit_reserve_group')).toBe(String(fixtures().groups.legion));
+	expect(await getSetting('access_audit_retired_group')).toBe(String(fixtures().groups.reserve));
 	expect(await getSetting('access_audit_legion_group')).toBe(String(fixtures().groups.unit));
 
 	const [entry] = await adminLog();
@@ -113,7 +116,7 @@ test('saves the unit, its name, the field and the groups', async ({ page }) => {
 	// The audit now goes by them.
 	await openAudit(page);
 	await expect(page.locator('#content')).toContainText(
-		'Active members of Midsouth Garrison belong in both Command Staff and Garrison Members, and its Reserve members in both 501st Members and Garrison Members.'
+		'Active members of Midsouth Garrison belong in both Command Staff and Garrison Members, and its Reserve members in both 501st Members and Garrison Members. Its Retired members belong in Garrison Reserve only.'
 	);
 });
 
@@ -129,7 +132,10 @@ test("trims the API's stray spaces from a unit's name", async ({ page }) => {
 for (const [first, second] of [
 	['unit_group', 'legion_group'],
 	['unit_group', 'reserve_group'],
+	['unit_group', 'retired_group'],
+	['reserve_group', 'retired_group'],
 	['reserve_group', 'legion_group'],
+	['retired_group', 'legion_group'],
 ]) {
 	test(`will not save the same group as ${first} and ${second}`, async ({ page }) => {
 		await gotoAuditSettings(page);
@@ -138,7 +144,7 @@ for (const [first, second] of [
 		await save(page);
 
 		await expect(page.locator('.error')).toContainText(
-			'The unit members, reserve members and 501st members groups must be three different groups.'
+			'The unit members, reserve members, retired members and 501st members groups must be four different groups.'
 		);
 		expect(await getSetting(`access_audit_${second}`)).not.toBe(chosen);
 		// What was chosen is still chosen.
@@ -153,6 +159,7 @@ test('will not save without every choice made', async ({ page }) => {
 		'#legion_id_field',
 		'#unit_group',
 		'#reserve_group',
+		'#retired_group',
 		'#legion_group',
 	]) {
 		await page.locator(select).selectOption('0');
@@ -166,6 +173,7 @@ test('will not save without every choice made', async ({ page }) => {
 		"Choose the profile field that holds members' Legion IDs.",
 		'Choose the unit members group.',
 		'Choose the reserve members group.',
+		'Choose the retired members group.',
 		'Choose the 501st members group.',
 	]);
 	expect(await getSetting('access_audit_unit')).toBe(String(OUR_UNIT.id));
@@ -333,8 +341,8 @@ test.describe('squads', () => {
 
 	const refusals: [string, string, (page: import('@playwright/test').Page) => Promise<void>][] = [
 		[
-			"one of the other three groups as a squad's",
-			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members and 501st members groups.",
+			"one of the other four groups as a squad's",
+			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members, retired members and 501st members groups.",
 			async (page) => {
 				await page
 					.locator(`#squad_group_${SQUAD.id}`)
@@ -343,7 +351,7 @@ test.describe('squads', () => {
 		],
 		[
 			'two squads in one group',
-			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members and 501st members groups.",
+			"Each squad needs a group of its own, not another squad's or one of the unit members, reserve members, retired members and 501st members groups.",
 			async (page) => {
 				await page
 					.locator(`#squad_group_${OTHER_SQUAD.id}`)
@@ -433,16 +441,16 @@ test.describe('squads', () => {
 		await expect(squadRows(page)).toHaveText(['Snowy Range Squad']);
 	});
 
-	test('says when the unit has no squads', async ({ page }) => {
+	test('leaves the squads out when the unit has none', async ({ page }) => {
 		await gotoAuditSettings(page);
 		await page.locator('#unit').selectOption(String(OUTPOST.id));
 		await clearSquad(page);
 		await save(page);
 
-		await expect(page.locator('#access_audit_squads_none')).toHaveText(
-			"The 501st's records show no squads in this unit."
-		);
+		await expect(page.locator('#flash_message')).toHaveText('The settings have been saved.');
+		await expect(page.getByText('Active members of each squad given a group')).toHaveCount(0);
 		await expect(page.locator('tr.access-audit-squad-row')).toHaveCount(0);
+		await expect(page.locator('#access_audit_save_settings')).toBeVisible();
 	});
 
 	test.describe('while the API is down', () => {

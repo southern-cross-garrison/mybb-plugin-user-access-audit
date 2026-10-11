@@ -11,6 +11,8 @@ import {
 	execute,
 	fixtures,
 	getGroups,
+	getLegionId,
+	query,
 	setGroups,
 	setLegionId,
 	uid,
@@ -21,8 +23,12 @@ import {
 	OUTPOST,
 	SQUAD,
 	UNAUDITED_SQUAD,
+	emailMatch,
+	emailRequests,
+	emailsDown,
 	legionApiMember,
 	memberRequests,
+	stubEmail,
 	stubFixtureMembers,
 	stubLegionApi,
 	unstubLegionApi,
@@ -62,6 +68,7 @@ test.describe('the audit', () => {
 			unchecked: 0,
 			banned: 1,
 			shared: 0,
+			found: 0,
 		});
 		await expect(page.locator('#access_audit_empty')).toHaveText(
 			"Every member's groups are correct."
@@ -83,7 +90,7 @@ test.describe('the audit', () => {
 		await openAudit(page);
 
 		await expect(page.locator('#content')).toContainText(
-			'Active members of Southern Cross Garrison belong in both Garrison Members and 501st Members, and its Reserve members in both Garrison Reserve and 501st Members. Active and Reserve members of any other unit belong in 501st Members only.'
+			'Active members of Southern Cross Garrison belong in both Garrison Members and 501st Members, and its Reserve members in both Garrison Reserve and 501st Members. Its Retired members belong in Garrison Retired only. Active and Reserve members of any other unit belong in 501st Members only.'
 		);
 	});
 
@@ -133,7 +140,7 @@ test.describe('who belongs where', () => {
 			displaygroup: 0,
 		});
 		await expect(flash(page)).toHaveText(
-			"guestmember's groups have been fixed: Remove from Garrison Members; Remove from 501st Members."
+			'guestmember has been fixed: Remove from Garrison Members; Remove from 501st Members.'
 		);
 		await expect(row(page, 'guestmember')).toHaveCount(0);
 	});
@@ -221,21 +228,115 @@ test.describe('who belongs where', () => {
 		expect((await getGroups('legionmember')).additionalgroups).toEqual([groups().legion]);
 	});
 
-	test('a member neither Active nor Reserve belongs in none of the groups', async ({ page }) => {
+	test('a member neither Active, Reserve nor Retired belongs in none of the groups', async ({
+		page,
+	}) => {
 		await setGroups('unitmember', {
-			additionalgroups: [groups().unit, groups().reserve, groups().legion],
+			additionalgroups: [groups().unit, groups().reserve, groups().retired, groups().legion],
 		});
-		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired' }));
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Inactive' }));
 		await openAudit(page);
 
 		const member = row(page, 'unitmember');
-		await expect(member.locator('.access-audit-status')).toHaveText('Retired');
+		await expect(member.locator('.access-audit-status')).toHaveText('Inactive');
 		await expect(member.locator('.access-audit-change')).toHaveText(
-			'Remove from Garrison Members; Remove from Garrison Reserve; Remove from 501st Members'
+			'Remove from Garrison Members; Remove from Garrison Reserve; Remove from Garrison Retired; Remove from 501st Members'
 		);
 
 		await fix(page, 'unitmember');
 		expect((await getGroups('unitmember')).additionalgroups).toEqual([]);
+	});
+
+	test('a member of this unit who has retired belongs in the retired members group alone', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			additionalgroups: [groups().unit, groups().legion, groups().command],
+		});
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired', fullName: 'Unit Member' }));
+		await openAudit(page);
+
+		const member = row(page, 'unitmember');
+		await expect(member.locator('.access-audit-status')).toHaveText('Retired');
+		await expect(member.locator('.access-audit-unit')).toHaveText('Southern Cross Garrison');
+		// No longer a 501st member, so that group goes too.
+		await expect(member.locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Retired; Remove from Garrison Members; Remove from 501st Members'
+		);
+
+		await fix(page, 'unitmember');
+		// Command Staff is none of the audit's business.
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: REGISTERED,
+			additionalgroups: [groups().command, groups().retired].sort((a, b) => a - b),
+			displaygroup: 0,
+		});
+	});
+
+	test('a Retired member of this unit leaves the reserve members group', async ({ page }) => {
+		await setGroups('unitmember', { additionalgroups: [groups().reserve, groups().legion] });
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired' }));
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Retired; Remove from Garrison Reserve; Remove from 501st Members'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual([groups().retired]);
+	});
+
+	test('a Retired member of this unit in the retired members group needs nothing', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', { additionalgroups: [groups().retired] });
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired' }));
+		await openAudit(page, { all: true });
+
+		await expect(row(page, 'unitmember').locator('.access-audit-groups')).toHaveText(
+			'Garrison Retired'
+		);
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText('Nothing');
+	});
+
+	test('a member of this unit back from retirement leaves the retired members group', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', { additionalgroups: [groups().retired] });
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Members; Add to 501st Members; Remove from Garrison Retired'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual(
+			[groups().unit, groups().legion].sort((a, b) => a - b)
+		);
+	});
+
+	test('a Retired member of another unit belongs in none of the groups', async ({ page }) => {
+		// The retired members group is this unit's own retired, not anybody's.
+		await setGroups('legionmember', { additionalgroups: [groups().retired, groups().legion] });
+		stubLegionApi(10002, legionApiMember(10002, { status: 'Retired', unit: OTHER_UNIT }));
+		await openAudit(page);
+
+		await expect(row(page, 'legionmember').locator('.access-audit-change')).toHaveText(
+			'Remove from Garrison Retired; Remove from 501st Members'
+		);
+		await fix(page, 'legionmember');
+		expect((await getGroups('legionmember')).additionalgroups).toEqual([]);
+	});
+
+	test('a member of this unit with no public record leaves the retired members group', async ({
+		page,
+	}) => {
+		// A private record cannot be told from any other, so it says nothing about retiring.
+		await setGroups('unitmember', { additionalgroups: [groups().retired] });
+		stubLegionApi(10001, CLASSIFIED);
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Remove from Garrison Retired'
+		);
 	});
 
 	test('a member in none of the groups says so', async ({ page }) => {
@@ -450,12 +551,28 @@ test.describe('squads', () => {
 		await setGroups('unitmember', {
 			additionalgroups: [groups().unit, groups().legion, groups().squad],
 		});
-		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired', squad: SQUAD }));
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Inactive', squad: SQUAD }));
 		await openAudit(page);
 
 		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
 			'Remove from Garrison Members; Remove from 501st Members; Remove from Hunter Valley Squad Members'
 		);
+	});
+
+	test('a Retired member of the squad leaves its group for the retired members group', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			additionalgroups: [groups().unit, groups().legion, groups().squad],
+		});
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired', squad: SQUAD }));
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Retired; Remove from Garrison Members; Remove from 501st Members; Remove from Hunter Valley Squad Members'
+		);
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual([groups().retired]);
 	});
 
 	test('a member of a squad the board does not audit gets no squad group', async ({ page }) => {
@@ -561,6 +678,191 @@ test.describe('the Legion ID', () => {
 		await expect(row(page, 'trooper2').locator('.access-audit-legion-id a')).toHaveCount(0);
 		await expect(row(page, 'guestmember').locator('.access-audit-legion-id')).toHaveText('None');
 		await expect(row(page, 'guestmember').locator('.access-audit-legion-id a')).toHaveCount(0);
+	});
+});
+
+test.describe('a Legion ID found by email address', () => {
+	const GUEST_EMAIL = 'guestmember@example.test';
+
+	test('is used for a member with none on their profile, and saved by Fix with their groups', async ({
+		page,
+	}) => {
+		stubEmail(GUEST_EMAIL, emailMatch(20003));
+		stubLegionApi(20003, legionApiMember(20003, { fullName: 'Guest Member' }));
+		await openAudit(page);
+
+		const guest = row(page, 'guestmember');
+		await expect(guest).toHaveClass(/access-audit-found-id/);
+		await expect(guest.locator('.access-audit-legion-id')).toContainText('None');
+		const found = guest.locator('.access-audit-found');
+		await expect(found).toHaveText('Found by email address: 20003');
+		await expect(found.locator('a')).toHaveAttribute('href', 'https://501st.com/member/20003');
+		await expect(guest.locator('.access-audit-record')).toContainText(
+			'Active - Southern Cross Garrison'
+		);
+		await expect(guest.locator('.access-audit-change')).toHaveText(
+			'Set Legion ID to 20003; Add to Garrison Members; Add to 501st Members'
+		);
+		expect((await counts(page)).found).toBe(1);
+		expect(emailRequests()).toContain(`/email/${GUEST_EMAIL}`);
+
+		await fix(page, 'guestmember');
+
+		expect(await getLegionId('guestmember')).toBe('20003');
+		expect((await getGroups('guestmember')).additionalgroups).toEqual(
+			[groups().unit, groups().legion].sort((a, b) => a - b)
+		);
+		await expect(flash(page)).toHaveText(
+			'guestmember has been fixed: Set Legion ID to 20003; Add to Garrison Members; Add to 501st Members.'
+		);
+		// Their own Legion ID from now on, and their groups right for it.
+		await expect(row(page, 'guestmember')).toHaveCount(0);
+		const [entry] = await adminLog();
+		expect(entry.data).toContain('Set Legion ID to 20003');
+	});
+
+	test('is offered even when it leaves their groups as they are', async ({ page }) => {
+		stubEmail(GUEST_EMAIL, emailMatch(20003));
+		stubLegionApi(20003, CLASSIFIED);
+		await openAudit(page);
+
+		await expect(row(page, 'guestmember').locator('.access-audit-change')).toHaveText(
+			'Set Legion ID to 20003'
+		);
+		await fix(page, 'guestmember');
+
+		expect(await getLegionId('guestmember')).toBe('20003');
+		expect(await getGroups('guestmember')).toEqual({
+			usergroup: REGISTERED,
+			additionalgroups: [],
+			displaygroup: 0,
+		});
+	});
+
+	test('replaces a Legion ID with no number in it', async ({ page }) => {
+		await setLegionId('trooper2', 'pending');
+		stubEmail('trooper2@example.test', emailMatch(20002));
+		await openAudit(page);
+
+		const trooper = row(page, 'trooper2');
+		await expect(trooper.locator('.access-audit-legion-id')).toContainText('pending');
+		await expect(trooper.locator('.access-audit-found')).toHaveText(
+			'Found by email address: 20002'
+		);
+		await fix(page, 'trooper2');
+
+		expect(await getLegionId('trooper2')).toBe('20002');
+	});
+
+	test('is saved for a member with no profile fields row at all', async ({ page }) => {
+		await execute(`DELETE FROM ${T('userfields')} WHERE ufid = ?`, [uid('guestmember')]);
+		stubEmail(GUEST_EMAIL, emailMatch(20003));
+		stubLegionApi(20003, CLASSIFIED);
+		await openAudit(page);
+
+		await fix(page, 'guestmember');
+
+		expect(await getLegionId('guestmember')).toBe('20003');
+	});
+
+	test('is only looked for when there is no Legion ID on the profile, and not for banned members', async ({
+		page,
+	}) => {
+		await setLegionId('banned', '');
+		await openAudit(page, { all: true });
+
+		expect(emailRequests()).toContain(`/email/${GUEST_EMAIL}`);
+		expect(emailRequests()).not.toContain('/email/unitmember@example.test');
+		expect(emailRequests()).not.toContain('/email/banned@example.test');
+		// No match is an answer: no Legion ID, as before.
+		await expect(row(page, 'guestmember').locator('.access-audit-record')).toHaveText(
+			'No Legion ID on their profile'
+		);
+		await expect(row(page, 'guestmember').locator('.access-audit-found')).toHaveCount(0);
+	});
+
+	test('is shared with an account that has it on their profile', async ({ page }) => {
+		// unitmember is TK-10001.
+		stubEmail(GUEST_EMAIL, emailMatch(10001));
+		await openAudit(page);
+
+		await expect(row(page, 'guestmember').locator('.access-audit-shared a')).toHaveText([
+			'unitmember',
+		]);
+		await expect(row(page, 'unitmember').locator('.access-audit-shared a')).toHaveText([
+			'guestmember',
+		]);
+		await expect(row(page, 'guestmember').locator('.access-audit-change')).toHaveText(
+			'Set Legion ID to 10001; Add to Garrison Members; Add to 501st Members'
+		);
+		expect(memberRequests().filter((request) => request === '/legionId/10001')).toHaveLength(1);
+	});
+
+	test('is worked out again when Fix is pressed, never taken from the page', async ({ page }) => {
+		stubEmail(GUEST_EMAIL, emailMatch(20003));
+		stubLegionApi(20003, CLASSIFIED);
+		await openAudit(page);
+		await expect(fixButton(page, 'guestmember')).toBeVisible();
+
+		// They put their own in meanwhile.
+		await setLegionId('guestmember', 'TK-10002');
+		await fix(page, 'guestmember');
+
+		expect(await getLegionId('guestmember')).toBe('TK-10002');
+		expect((await getGroups('guestmember')).additionalgroups).toEqual([groups().legion]);
+	});
+
+	const unusable: Array<[string, Parameters<typeof stubEmail>[1] | null]> = [
+		['is down', null],
+		['answers with an error', { status: 500, body: { message: 'Internal Server Error' } }],
+		['answers with something that is not JSON', { raw: '<html>Bad Gateway</html>' }],
+		['answers with something that is not a Legion ID', { body: { legionId: '<b>1</b>' } }],
+	];
+
+	for (const [answer, response] of unusable) {
+		test(`leaves a member with no Legion ID alone when the API ${answer}`, async ({ page }) => {
+			if (response) {
+				stubEmail(GUEST_EMAIL, response);
+			} else {
+				emailsDown();
+			}
+			await setGroups('guestmember', { additionalgroups: [groups().unit] });
+			await openAudit(page);
+
+			const guest = row(page, 'guestmember');
+			await expect(guest.locator('.access-audit-record')).toHaveText(
+				'Could not reach the 501st Legion API'
+			);
+			await expect(guest.locator('.access-audit-change')).toHaveText(
+				'Unknown until the API answers'
+			);
+			await expect(fixButton(page, 'guestmember')).toHaveCount(0);
+
+			const key = await page.locator('input[name="my_post_key"]').getAttribute('value');
+			await page.request.post('/admin/index.php?module=user-access_audit&action=fix', {
+				form: { my_post_key: key!, uid: String(uid('guestmember')) },
+			});
+			expect((await getGroups('guestmember')).additionalgroups).toEqual([groups().unit]);
+			expect(await getLegionId('guestmember')).toBe('');
+		});
+	}
+
+	test('answers are kept, without the address, and forgotten by Check Again', async ({ page }) => {
+		stubEmail(GUEST_EMAIL, emailMatch(20003));
+		stubLegionApi(20003, CLASSIFIED);
+		await openAudit(page);
+		const asked = emailRequests().length;
+
+		await openAudit(page);
+		expect(emailRequests()).toHaveLength(asked);
+
+		const kept = await query(`SELECT * FROM ${T('access_audit_email_lookups')}`);
+		expect(kept.length).toBe(asked);
+		expect(JSON.stringify(kept)).not.toContain('@');
+
+		await page.locator('#access_audit_refresh').click();
+		await expect(row(page, 'guestmember')).toBeVisible();
+		expect(emailRequests()).toHaveLength(asked * 2);
 	});
 });
 
@@ -699,6 +1001,29 @@ test.describe('a primary group taken away', () => {
 		expect(await getGroups('unitmember')).toEqual({
 			usergroup: groups().reserve,
 			additionalgroups: [groups().legion],
+			displaygroup: 0,
+		});
+	});
+
+	test('becomes the retired members group for a member of this unit who has retired', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			usergroup: groups().unit,
+			additionalgroups: [groups().legion, groups().squad],
+			displaygroup: groups().unit,
+		});
+		stubLegionApi(10001, legionApiMember(10001, { status: 'Retired', squad: SQUAD }));
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Add to Garrison Retired; Remove from Garrison Members; Remove from 501st Members; Remove from Hunter Valley Squad Members; Primary group becomes Garrison Retired'
+		);
+
+		await fix(page, 'unitmember');
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: groups().retired,
+			additionalgroups: [],
 			displaygroup: 0,
 		});
 	});
@@ -908,7 +1233,7 @@ test.describe('fixing a member', () => {
 
 		await page.goto('/admin/index.php?module=tools-adminlog');
 		await expect(page.locator('#content')).toContainText(
-			`Fixed the groups of guestmember (#${uid('guestmember')}): Remove from Garrison Members`
+			`Fixed guestmember (#${uid('guestmember')}): Remove from Garrison Members`
 		);
 	});
 
@@ -1125,7 +1450,7 @@ test.describe('before it is set up', () => {
 		try {
 			await page.goto('/admin/index.php?module=user-access_audit');
 			await expect(page.locator('#access_audit_not_configured li')).toHaveText([
-				"Each squad's group must be a group of its own, not another squad's or one of the other three",
+				"Each squad's group must be a group of its own, not another squad's or one of the other four",
 			]);
 		} finally {
 			await restore();

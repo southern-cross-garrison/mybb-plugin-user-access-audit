@@ -4,7 +4,8 @@
  *
  * Checks every member's Legion ID against the 501st Legion's API and puts them in the
  * right groups: the 501st's members, for the unit's own members its active or reserve
- * group as well, and for active members of the squads chosen, each squad's group. Everything happens in the Admin CP, under Users & Groups -> Access Audit.
+ * group as well, the unit's retired members in its retired group alone, and for active
+ * members of the squads chosen, each squad's group. Everything happens in the Admin CP, under Users & Groups -> Access Audit.
  */
 
 if(!defined("IN_MYBB"))
@@ -34,7 +35,7 @@ function access_audit_info()
 {
     return array(
         "name"          => "Access Audit",
-        "description"   => "Audits members' group access against their 501st Legion membership: every Active or Reserve 501st member in the 501st group, the unit's own in its active or reserve group as well, active members of chosen squads in each squad's group, and everybody else in none of them.",
+        "description"   => "Audits members' group access against their 501st Legion membership: every Active or Reserve 501st member in the 501st group, the unit's own in its active or reserve group as well, the unit's retired members in its retired group alone, active members of chosen squads in each squad's group, and everybody else in none of them.",
         "website"       => "https://github.com/southern-cross-garrison/mybb-plugin-user-access-audit",
         "author"        => "Kevin Brown (TK-33151)",
         "authorsite"    => "https://www.501scg.org/",
