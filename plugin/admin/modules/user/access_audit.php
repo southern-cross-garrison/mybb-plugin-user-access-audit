@@ -373,7 +373,7 @@ if($action == "settings")
             {
                 $db->update_query("settings", array('value' => $db->escape_string($value)), "name = '" . $db->escape_string($name) . "'");
             }
-            rebuild_settings();
+            access_audit_rebuild_settings();
 
             // Another API's answers are not this one's.
             if(access_audit_api_base($previous_api) !== access_audit_api_base($values['api_url']))

@@ -60,6 +60,26 @@ define('ACCESS_AUDIT_OUR_UNIT_RESERVE', 'our_unit_reserve');
 define('ACCESS_AUDIT_BANNED', 'banned');
 
 /**
+ * Rebuild MyBB's settings, and see that the next request reads the new ones.
+ *
+ * rebuild_settings() rewrites inc/settings.php, which every request loads with require.
+ * Where OPcache is on, PHP goes on running its cached copy of the file until it next
+ * checks the timestamp - two seconds by default, and never on hosts that turn the check
+ * off - so the page a save redirects to would show the settings as they were.
+ */
+function access_audit_rebuild_settings()
+{
+    rebuild_settings();
+
+    if(function_exists('opcache_invalidate'))
+    {
+        // Hosts can disable the function or restrict OPcache to some paths, and either way
+        // the settings are saved: a stale page is all that is left.
+        @opcache_invalidate(MYBB_ROOT . "inc/settings.php", true);
+    }
+}
+
+/**
  * One of the plugin's settings.
  *
  * @param string $name Without the access_audit_ prefix
