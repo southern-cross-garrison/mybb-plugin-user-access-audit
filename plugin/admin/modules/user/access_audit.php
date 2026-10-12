@@ -874,6 +874,11 @@ if(!$action)
                 if($record['status'] === ACCESS_AUDIT_CLASSIFIED)
                 {
                     $record_html = $lang->access_audit_record_classified;
+                    if($result['verdict'] === ACCESS_AUDIT_CLASSIFIED_RETIRED)
+                    {
+                        $record_html .= "<div class=\"access-audit-classified-retired smalltext\">"
+                            . $lang->sprintf($lang->access_audit_record_classified_retired, access_audit_group_name($config['retired_group'])) . "</div>";
+                    }
                 }
                 else
                 {

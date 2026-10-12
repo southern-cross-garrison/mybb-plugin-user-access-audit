@@ -6,7 +6,8 @@
  *
  * - no Legion ID: in none of the four groups;
  * - a 501st record that is neither Active nor Reserve (a classified record, anything
- *   else): in none - except Retired in this unit, below;
+ *   else): in none - except Retired in this unit, below, and a classified record already
+ *   in the retired members group, which is left there;
  * - Active or Reserve, in another unit: in the 501st members group only;
  * - Active, in this unit: in the unit members group and the 501st members group - they are
  *   501st members as much as anybody;
@@ -50,7 +51,9 @@ define('ACCESS_AUDIT_RESERVE', 'Reserve');
 /**
  * Retired members are no longer 501st members, but this unit's own keep a group of their
  * own, and are in it alone. A retired member whose record is private comes back as a
- * classified record like anybody else, and cannot be told apart.
+ * classified record like anybody else, and cannot be told apart - so a member with a
+ * classified record who is in the retired members group already is left in it, though
+ * never put there.
  */
 define('ACCESS_AUDIT_RETIRED', 'Retired');
 
@@ -71,6 +74,7 @@ define('ACCESS_AUDIT_OUR_UNIT', 'our_unit');
 define('ACCESS_AUDIT_OTHER_UNIT_RESERVE', 'other_unit_reserve');
 define('ACCESS_AUDIT_OUR_UNIT_RESERVE', 'our_unit_reserve');
 define('ACCESS_AUDIT_OUR_UNIT_RETIRED', 'our_unit_retired');
+define('ACCESS_AUDIT_CLASSIFIED_RETIRED', 'classified_retired');
 define('ACCESS_AUDIT_BANNED', 'banned');
 
 /**
@@ -389,6 +393,18 @@ function access_audit_group_list($additionalgroups)
 }
 
 /**
+ * Whether a member is in a group, as their primary group or an additional one.
+ *
+ * @param array $member As access_audit_members()
+ * @param int $gid
+ * @return bool
+ */
+function access_audit_in_group(array $member, $gid)
+{
+    return (int)$member['usergroup'] === (int)$gid || in_array((int)$gid, access_audit_group_list($member['additionalgroups']), true);
+}
+
+/**
  * Audit members.
  *
  * @param array $config As access_audit_config(), with nothing missing
@@ -497,6 +513,14 @@ function access_audit_evaluate(array $config, array $members)
             // group takes over as primary when the one they had is taken away. Another
             // unit's retired members are no business of this unit's retired group.
             $verdict = ACCESS_AUDIT_OUR_UNIT_RETIRED;
+            $wanted = array((int)$config['retired_group']);
+        }
+        elseif($record['status'] === ACCESS_AUDIT_CLASSIFIED && access_audit_in_group($member, (int)$config['retired_group']))
+        {
+            // Retired members' records are often private, and a private record cannot be
+            // told from a retired one, so whoever put them in the retired members group is
+            // taken at their word. Nothing else is left: a classified record is not active.
+            $verdict = ACCESS_AUDIT_CLASSIFIED_RETIRED;
             $wanted = array((int)$config['retired_group']);
         }
         elseif($record['status'] !== ACCESS_AUDIT_ACTIVE && $record['status'] !== ACCESS_AUDIT_RESERVE)

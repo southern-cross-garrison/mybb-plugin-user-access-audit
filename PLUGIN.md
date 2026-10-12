@@ -88,7 +88,7 @@ A Legion ID is read as its digits, so "TK-12345", "TK 12345" and "12345" are all
 | The member                                                      | Belongs in                                   |
 | --------------------------------------------------------------- | -------------------------------------------- |
 | Has no Legion ID (or none with a number in it)                  | None of the groups                           |
-| Has no public record                                            | None of the groups                           |
+| Has no public record                                            | None of the groups (but see below)           |
 | Is Active or Reserve in another unit (an outpost is a unit too) | The 501st members group                      |
 | Is Active in your unit                                          | The unit members and 501st members groups    |
 | Is Reserve in your unit                                         | The reserve members and 501st members groups |
@@ -105,8 +105,12 @@ Members with no Legion ID on their profile are looked up by email address (see b
 are not checked until then.
 
 "No public record" is the API's answer both for a private record and for an ID that does
-not exist. A member with a private record, Active or Retired, is flagged for removal; they
-can make their record public on 501st.com, or you can leave their row alone.
+not exist. A member with a private record who is Active is flagged for removal; they can
+make their record public on 501st.com, or you can leave their row alone. Retired members'
+records are often private, and a private record cannot be told from a retired one, so a
+member with no public record who is already in the retired members group is left in it
+(and taken out of the others). Nobody is put in the retired members group without a public
+Retired record.
 
 ## Legion IDs found by email address
 

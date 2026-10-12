@@ -60,7 +60,7 @@ $l['access_audit_error_squad_same_group'] = "Each squad needs a group of its own
 $l['access_audit_not_configured'] = "The audit cannot run until it has been set up on the <a href=\"{1}\">Settings</a> tab. Still needed:";
 $l['access_audit_not_configured_short'] = "The audit has not been set up yet.";
 $l['access_audit_summary'] = "Summary";
-$l['access_audit_summary_rules'] = "Active members of <strong>{1}</strong> belong in both <strong>{2}</strong> and <strong>{3}</strong>, and its Reserve members in both <strong>{4}</strong> and <strong>{3}</strong>. Its Retired members belong in <strong>{5}</strong> only. Active and Reserve members of any other unit belong in <strong>{3}</strong> only. Anybody else - no Legion ID, any other status, or no public 501st record - belongs in none of them.";
+$l['access_audit_summary_rules'] = "Active members of <strong>{1}</strong> belong in both <strong>{2}</strong> and <strong>{3}</strong>, and its Reserve members in both <strong>{4}</strong> and <strong>{3}</strong>. Its Retired members belong in <strong>{5}</strong> only. Active and Reserve members of any other unit belong in <strong>{3}</strong> only. Anybody else - no Legion ID, any other status, or no public 501st record - belongs in none of them, except that a member with no public record who is in <strong>{5}</strong> already is left in it, since a retired member's record can be private.";
 $l['access_audit_summary_squad'] = "Active members of <strong>{1}</strong> belong in <strong>{2}</strong> as well.";
 $l['access_audit_summary_email'] = "Members with no Legion ID on their profile are looked up by email address in the background (see <a href=\"{1}\">Legion IDs</a>) and are not checked until then.";
 $l['access_audit_count_checked'] = "Members checked";
@@ -93,6 +93,7 @@ $l['access_audit_record_no_legion_id'] = "No Legion ID on their profile";
 $l['access_audit_record_unchecked'] = "Could not reach the 501st Legion API";
 $l['access_audit_record_waiting'] = "No Legion ID on their profile, and not looked up by email address yet";
 $l['access_audit_record_classified'] = "No public record - private, retired, or not a real Legion ID";
+$l['access_audit_record_classified_retired'] = "Left in {1}: a retired member's record can be private, so whether they have retired cannot be told.";
 $l['access_audit_record_banned'] = "Banned - left alone";
 $l['access_audit_shared_with'] = "Same Legion ID as {1}. Check which account is really theirs before fixing either.";
 

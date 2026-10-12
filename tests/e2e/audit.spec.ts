@@ -325,17 +325,65 @@ test.describe('who belongs where', () => {
 		expect((await getGroups('legionmember')).additionalgroups).toEqual([]);
 	});
 
-	test('a member of this unit with no public record leaves the retired members group', async ({
+	test('a member with no public record in the retired members group is left in it alone', async ({
 		page,
 	}) => {
-		// A private record cannot be told from any other, so it says nothing about retiring.
+		// Retired members' records are often private, and a private record cannot be told
+		// from a retired one. Not active either way, so the other groups go.
+		await setGroups('unitmember', {
+			additionalgroups: [groups().unit, groups().retired, groups().legion, groups().squad],
+		});
+		stubLegionApi(10001, CLASSIFIED);
+		await openAudit(page);
+
+		const member = row(page, 'unitmember');
+		await expect(member.locator('.access-audit-record')).toHaveText(
+			'No public record - private, retired, or not a real Legion ID' +
+				"Left in Garrison Retired: a retired member's record can be private, so whether they have retired cannot be told."
+		);
+		await expect(member.locator('.access-audit-change')).toHaveText(
+			'Remove from Garrison Members; Remove from 501st Members; Remove from Hunter Valley Squad Members'
+		);
+
+		await fix(page, 'unitmember');
+		expect((await getGroups('unitmember')).additionalgroups).toEqual([groups().retired]);
+	});
+
+	test('a member with no public record in only the retired members group needs nothing', async ({
+		page,
+	}) => {
 		await setGroups('unitmember', { additionalgroups: [groups().retired] });
 		stubLegionApi(10001, CLASSIFIED);
 		await openAudit(page);
 
-		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
-			'Remove from Garrison Retired'
+		await expect(row(page, 'unitmember')).toHaveCount(0);
+		await openAudit(page, { all: true });
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText('Nothing');
+		await expect(row(page, 'unitmember').locator('.access-audit-classified-retired')).toHaveCount(
+			1
 		);
+	});
+
+	test('a member with no public record keeps the retired members group as primary', async ({
+		page,
+	}) => {
+		await setGroups('unitmember', {
+			usergroup: groups().retired,
+			additionalgroups: [groups().legion],
+			displaygroup: groups().retired,
+		});
+		stubLegionApi(10001, CLASSIFIED);
+		await openAudit(page);
+
+		await expect(row(page, 'unitmember').locator('.access-audit-change')).toHaveText(
+			'Remove from 501st Members'
+		);
+		await fix(page, 'unitmember');
+		expect(await getGroups('unitmember')).toEqual({
+			usergroup: groups().retired,
+			additionalgroups: [],
+			displaygroup: groups().retired,
+		});
 	});
 
 	test('a member in none of the groups says so', async ({ page }) => {
@@ -354,6 +402,7 @@ test.describe('who belongs where', () => {
 		await expect(trooper.locator('.access-audit-record')).toHaveText(
 			'No public record - private, retired, or not a real Legion ID'
 		);
+		// Never put in the retired members group: that takes a public Retired record.
 		await expect(trooper.locator('.access-audit-change')).toHaveText('Remove from 501st Members');
 
 		await fix(page, 'trooper1');
